@@ -1,18 +1,19 @@
-# CNB 流水线：编译 Windows 软件 + 自动打 Tag + 发布 Release
+# CNB 流水线
 #
-# 触发方式：网页手动按钮（在仓库「流水线」页点击「构建 Windows 安装包」）
-#   按钮配置见 .cnb/web_trigger.yml，事件名 web_trigger_build 与下方事件键对应。
-#   按钮输入：app_version（版本号）、is_pre_release（预发布开关）
-#   CNB 会把 web_trigger 的 inputs 注入为环境变量（变量名 = input key 大写）。
+# 包含两条流水线：
+#   1. build-windows-release：编译 Windows 安装包 + 自动打 Tag + 发布 Release
+#      触发：网页按钮「构建 Windows 安装包」（.cnb/web_trigger.yml）
+#      运行：自托管 Windows 构建机（runner.namespace: group + tags: [windows, x64]）
+#   2. mirror-to-github：把代码镜像推送到 GitHub
+#      触发：push 到 main / 网页按钮「同步到 GitHub」
+#      运行：Linux 官方构建机
 #
-# 前置条件：
-#   1. 已接入自托管 Windows 构建机（root org 维度）
-#   2. Windows 节点已预装：MSVC Build Tools、Rust (stable)、Flutter、Inno Setup 6
-#   3. Windows 节点不支持 Docker，stage 默认走 PowerShell
-#
-# 自动化流程：网页触发 -> 编译 Rust 后端 -> 编译 Flutter 前端 -> 整理产物
-#          -> Inno Setup 打包 -> 计算 tag -> git:release 创建 tag 并发布到 Release
+# ── 密钥配置 ──────────────────────────────────────────
+# 在 CNB 仓库设置 → 密钥管理 中添加：
+#   GITHUB_TOKEN = <你的 GitHub Personal Access Token，需 repo 权限>
+# 流水线中通过 $GITHUB_TOKEN 引用。
 
+# ── 1. 构建 Windows 安装包 ──────────────────────────────
 $:
   web_trigger_build:
     - name: build-windows-release
@@ -22,7 +23,6 @@ $:
           - windows
           - x64
       env:
-        # 兜底默认值，若按钮未传则用 0.1.0
         APP_VERSION: "0.1.0"
         IS_PRE_RELEASE: "false"
       stages:
@@ -39,7 +39,7 @@ $:
           script: |
             Set-Location backend
             cargo build --release
-            if (-not (Test-Path target\release\hyrwbz_backend.exe)) { throw "后端编译失败" }
+            if (-not (Test-Path "target\release\hyrwbz_backend.exe")) { throw "后端编译失败" }
         - name: build-frontend
           script: |
             Set-Location frontend
@@ -48,14 +48,14 @@ $:
             }
             flutter pub get
             flutter build windows --release
-            if (-not (Test-Path build\windows\x64\runner\Release)) { throw "前端编译失败" }
+            if (-not (Test-Path "build\windows\x64\runner\Release")) { throw "前端编译失败" }
         - name: stage-installer
           script: |
             $dist = "installer\dist"
             New-Item -ItemType Directory -Force -Path "$dist\frontend" | Out-Null
-            Copy-Item -Recurse -Force frontend\build\windows\x64\runner\Release\* "$dist\frontend\"
-            Copy-Item -Force backend\target\release\hyrwbz_backend.exe "$dist\"
-            Copy-Item -Force installer\run.bat "$dist\"
+            Copy-Item -Recurse -Force "frontend\build\windows\x64\runner\Release\*" "$dist\frontend\"
+            Copy-Item -Force "backend\target\release\hyrwbz_backend.exe" "$dist\"
+            Copy-Item -Force "installer\run.bat" "$dist\"
         - name: build-installer
           script: |
             $iscc = Get-Command iscc -ErrorAction SilentlyContinue
@@ -63,8 +63,8 @@ $:
               $iscc = Get-Command "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue
             }
             if (-not $iscc) { throw "Inno Setup (ISCC) 未安装" }
-            & $iscc.Source installer\hyrwbz.iss
-            Get-ChildItem build\installer -Filter *.exe | Format-List FullName
+            & $iscc.Source "installer\hyrwbz.iss"
+            Get-ChildItem "build\installer" -Filter *.exe | Format-List FullName
         - name: compute-tag
           script: |
             $ver = $Env:APP_VERSION
@@ -83,3 +83,40 @@ $:
               - 兼容: Windows 10 / Windows 11
               - 构建: $Env:CNB_COMMIT_SHORT
               - 安装: 解压后运行安装包 .exe 即可
+
+  # 网页按钮「同步到 GitHub」
+  web_trigger_sync_github:
+    - name: sync-to-github
+      docker:
+        image: alpine:3.20
+      stages:
+        - name: install-git
+          script: apk add --no-cache git
+        - name: push-to-github
+          script: |
+            set -e
+            git config --global user.email "cnb-bot@cnb.cool"
+            git config --global user.name "CNB Mirror Bot"
+            git remote remove github 2>/dev/null || true
+            git remote add github "https://x-access-token:${GITHUB_TOKEN}@github.com/Deanyu148/hyrwbz.git"
+            git push --force-with-lease github "refs/heads/${CNB_BRANCH}:refs/heads/${CNB_BRANCH}"
+            echo "已手动同步到 GitHub: https://github.com/Deanyu148/hyrwbz.git (branch: ${CNB_BRANCH})"
+
+# ── 2. push 触发自动镜像到 GitHub ───────────────────────
+main:
+  push:
+    - name: mirror-to-github
+      docker:
+        image: alpine:3.20
+      stages:
+        - name: install-git
+          script: apk add --no-cache git
+        - name: push-to-github
+          script: |
+            set -e
+            git config --global user.email "cnb-bot@cnb.cool"
+            git config --global user.name "CNB Mirror Bot"
+            git remote remove github 2>/dev/null || true
+            git remote add github "https://x-access-token:${GITHUB_TOKEN}@github.com/Deanyu148/hyrwbz.git"
+            git push --force-with-lease github "refs/heads/${CNB_BRANCH}:refs/heads/${CNB_BRANCH}"
+            echo "已同步到 GitHub: https://github.com/Deanyu148/hyrwbz.git (branch: ${CNB_BRANCH})"
