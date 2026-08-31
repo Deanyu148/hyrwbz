@@ -122,7 +122,7 @@ $:
         GH_REPO: "Deanyu148/hyrwbz"
       stages:
         - name: install-tools
-          script: apk add --no-cache curl jq unzip
+          script: apk add --no-cache curl jq unzip file
         - name: fetch-latest-run
           script: |
             set -e
@@ -176,7 +176,8 @@ $:
               echo "下载的文件信息："
               file /tmp/logs.zip
               ls -la /tmp/logs.zip
-              head -c 4 /tmp/logs.zip | xxd
+              echo "前 4 字节 magic："
+              head -c 4 /tmp/logs.zip | od -A x -t x1z | head -1
               rm -rf /tmp/logs && mkdir -p /tmp/logs
               # 尝试多种解压方式
               python3 -c "import zipfile; zipfile.ZipFile('/tmp/logs.zip').extractall('/tmp/logs'); print('zipfile 解压成功')" 2>&1 || {
