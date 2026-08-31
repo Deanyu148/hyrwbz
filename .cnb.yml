@@ -1,0 +1,76 @@
+# CNB 流水线：编译 Windows 软件 + 自动打 Tag + 发布 Release
+#
+# 前置条件：
+#   1. 已接入自托管 Windows 构建机（root org 维度）
+#   2. Windows 节点已预装：MSVC Build Tools、Rust (stable)、Flutter、Inno Setup 6
+#   3. Windows 节点不支持 Docker，stage 默认走 PowerShell
+#
+# 自动化流程：
+#   push -> 编译 Rust 后端 -> 编译 Flutter 前端 -> 整理产物 -> Inno Setup 打包
+#        -> 计算 tag -> git:release 创建 tag 并发布到 Release
+
+main:
+  push:
+    - name: build-windows-release
+      runner:
+        namespace: group
+        tags:
+          - windows
+          - x64
+      env:
+        APP_VERSION: "0.1.0"
+      stages:
+        - name: show-env
+          script: |
+            Write-Host "Branch: $Env:CNB_BRANCH"
+            Write-Host "Commit: $Env:CNB_COMMIT_SHORT"
+            rustc --version
+            cargo --version
+            flutter --version | Select-Object -First 2
+        - name: build-backend
+          script: |
+            Set-Location backend
+            cargo build --release
+            if (-not (Test-Path target\release\hyrwbz_backend.exe)) { throw "后端编译失败" }
+        - name: build-frontend
+          script: |
+            Set-Location frontend
+            if (-not (Test-Path windows)) {
+              flutter create . --platforms=windows --project-name=hyrwbz_frontend
+            }
+            flutter pub get
+            flutter build windows --release
+            if (-not (Test-Path build\windows\x64\runner\Release)) { throw "前端编译失败" }
+        - name: stage-installer
+          script: |
+            $dist = "installer\dist"
+            New-Item -ItemType Directory -Force -Path "$dist\frontend" | Out-Null
+            Copy-Item -Recurse -Force frontend\build\windows\x64\runner\Release\* "$dist\frontend\"
+            Copy-Item -Force backend\target\release\hyrwbz_backend.exe "$dist\"
+            Copy-Item -Force installer\run.bat "$dist\"
+        - name: build-installer
+          script: |
+            $iscc = Get-Command iscc -ErrorAction SilentlyContinue
+            if (-not $iscc) {
+              $iscc = Get-Command "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue
+            }
+            if (-not $iscc) { throw "Inno Setup (ISCC) 未安装" }
+            & $iscc.Source installer\hyrwbz.iss
+            Get-ChildItem build\installer -Filter *.exe | Format-List FullName
+        - name: compute-tag
+          script: |
+            $tag = "v$Env:APP_VERSION-$Env:CNB_COMMIT_SHORT"
+            Write-Host "Tag = $tag"
+            echo "##[set-output TAG=$tag]"
+          exports:
+            TAG: TAG
+        - name: create-release
+          type: git:release
+          options:
+            tag: $TAG
+            description: |
+              会议任务管理跟踪系统 (HYRWBZ) Windows 安装包
+              - 版本: $TAG
+              - 兼容: Windows 10 / Windows 11
+              - 构建: $Env:CNB_COMMIT_SHORT
+              - 安装: 解压后运行安装包 .exe 即可
