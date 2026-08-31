@@ -1,0 +1,28 @@
+# CNB 网页触发按钮配置
+# 在仓库「流水线」页面展示按钮，点击后触发 .cnb.yml 中对应事件名的流水线。
+# event 名需与 .cnb.yml 中的事件键一致（此处为 web_trigger_build）。
+
+branch:
+  - reg: ^main$
+    buttons:
+      - name: 构建 Windows 安装包
+        description: 编译 Rust 后端 + Flutter 前端，用 Inno Setup 打包，自动打 Tag 并发布 Release
+        event: web_trigger_build
+        permissions:
+          roles: [master, developer]
+        inputs:
+          APP_VERSION:
+            name: 版本号
+            description: 发布版本号，用于生成 Tag (v<版本号>-<commit>)
+            type: input
+            default: "0.1.0"
+            required: true
+            placeholder: "如 0.1.0"
+          IS_PRE_RELEASE:
+            name: 是否预发布
+            description: 标记此次 Release 为预发布版本
+            type: select
+            default: "false"
+            options:
+              - { name: 正式发布, value: "false" }
+              - { name: 预发布, value: "true" }
