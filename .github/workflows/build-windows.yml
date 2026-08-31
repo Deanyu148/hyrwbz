@@ -94,7 +94,6 @@ jobs:
           }
           if (-not (Test-Path $isccPath)) { throw "Inno Setup 安装失败" }
           Write-Host "Inno Setup 已就绪: $isccPath"
-          & $isccPath | Out-Null
 
       - name: Build installer
         shell: pwsh
