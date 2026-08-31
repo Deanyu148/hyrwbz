@@ -2,6 +2,7 @@ name: Build Windows Installer
 
 # 触发方式：仅网页手动按钮（Actions 页 → Run workflow）
 # 版本号自动递增：patch 满 9 进 minor，minor 满 9 进 major（如 0.1.9 → 0.2.0，0.9.9 → 1.0.0）
+# Tag/Release/安装包文件名/release body 全部只用数字版本号
 on:
   workflow_dispatch:
     inputs:
@@ -28,7 +29,6 @@ jobs:
           INPUT_IS_PRE_RELEASE: ${{ inputs.is_pre_release }}
         run: |
           $pre = if ($env:INPUT_IS_PRE_RELEASE -eq "true") { "true" } else { "false" }
-          $short = $env:GITHUB_SHA.Substring(0, 7)
           $newVer = "0.1.0"
           try {
             $rel = gh release list --repo $env:GITHUB_REPOSITORY --limit 1 --json tagName | ConvertFrom-Json
@@ -39,7 +39,6 @@ jobs:
                 $major = [int]$matches[1]
                 $minor = [int]$matches[2]
                 $patch = [int]$matches[3] + 1
-                # patch 满 9 进 minor；minor 满 9 进 major
                 if ($patch -gt 9) { $patch = 0; $minor += 1 }
                 if ($minor -gt 9) { $minor = 0; $major += 1 }
                 $newVer = "$major.$minor.$patch"
@@ -49,7 +48,6 @@ jobs:
           $tag = "v$newVer"
           Write-Host "New tag: $tag"
           echo "APP_VERSION=$newVer" >> $env:GITHUB_ENV
-          echo "COMMIT_SHORT=$short" >> $env:GITHUB_ENV
           echo "IS_PRE_RELEASE=$pre" >> $env:GITHUB_ENV
           echo "TAG=$tag" >> $env:GITHUB_OUTPUT
 
@@ -63,7 +61,6 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "Branch: $env:GITHUB_REF_NAME"
-          Write-Host "Commit: $env:COMMIT_SHORT"
           Write-Host "Version: $env:APP_VERSION"
           rustc --version
           cargo --version
@@ -118,7 +115,6 @@ jobs:
           Write-Host "Exists: $(Test-Path $issPath)"
           if (-not (Test-Path $issPath)) { throw "找不到 .iss 文件: $issPath" }
           Set-Location $root
-          # 把计算的版本号传给 ISCC，覆盖 .iss 里的 #define MyAppVersion
           & $isccPath "/DMyAppVersion=$env:APP_VERSION" $issPath
           Get-ChildItem (Join-Path $root "build\installer") -Filter *.exe | Format-List FullName
 
@@ -134,11 +130,6 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.TAG }}
           name: HYRWBZ ${{ steps.tag.outputs.TAG }}
-          body: |
-            会议任务管理跟踪系统 (HYRWBZ) Windows 安装包
-            - 版本: ${{ steps.tag.outputs.TAG }}
-            - 兼容: Windows 10 / Windows 11
-            - 构建: ${{ env.COMMIT_SHORT }}
-            - 安装: 下载 .exe 双击安装即可
+          body: ${{ steps.tag.outputs.TAG }}
           prerelease: ${{ env.IS_PRE_RELEASE == 'true' }}
           files: build/installer/*.exe
