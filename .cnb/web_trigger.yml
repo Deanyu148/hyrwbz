@@ -37,3 +37,8 @@ branch:
         event: web_trigger_gha_logs
         permissions:
           users: [1freedom]
+      - name: 同步 GitHub Releases 到 CNB
+        description: 全量镜像 GitHub (Deanyu148/hyrwbz) 的所有 Releases（含附件）到 CNB (asudad/hyrwbz)
+        event: web_trigger_sync_releases
+        permissions:
+          users: [1freedom]
