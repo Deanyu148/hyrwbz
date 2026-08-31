@@ -19,9 +19,8 @@ fn main() {
     out.push_str("pub static MIGRATIONS: &[&str] = &[\n");
     for p in &entries {
         let sql = fs::read_to_string(p).unwrap();
-        out.push_str("    r#####"");
-        out.push_str(&sql);
-        out.push_str(""#####,\n");
+        // 用 {:?} 把 SQL 转成 Rust 字符串字面量，自动处理所有转义
+        out.push_str(&format!("    {},\n", format!("{:?}", sql)));
     }
     out.push_str("];\n");
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
