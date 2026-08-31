@@ -9,9 +9,9 @@
 #      运行：Linux 官方构建机
 #
 # ── 密钥配置 ──────────────────────────────────────────
-# 在 CNB 仓库设置 → 密钥管理 中添加：
-#   GITHUB_TOKEN = <你的 GitHub Personal Access Token，需 repo 权限>
-# 流水线中通过 $GITHUB_TOKEN 引用。
+# GITHUB_TOKEN 通过 imports 从密钥仓库 asudad/secret 引入
+# 密钥文件：https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
+# 引入后可在 stages 脚本中通过 $GITHUB_TOKEN / ${GITHUB_TOKEN} 引用
 
 # ── 1. 构建 Windows 安装包 ──────────────────────────────
 $:
@@ -87,6 +87,8 @@ $:
   # 网页按钮「同步到 GitHub」
   web_trigger_sync_github:
     - name: sync-to-github
+      imports:
+        - https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
       docker:
         image: alpine:3.20
       stages:
@@ -106,6 +108,8 @@ $:
 main:
   push:
     - name: mirror-to-github
+      imports:
+        - https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
       docker:
         image: alpine:3.20
       stages:
