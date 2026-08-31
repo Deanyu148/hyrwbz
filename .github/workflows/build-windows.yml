@@ -6,6 +6,12 @@ name: Build Windows Installer
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '.cnb.yml'
+      - '.cnb/**'
+      - '.github/workflows/**'
+      - 'README.md'
+      - 'readme.md'
   workflow_dispatch:
     inputs:
       is_pre_release:
@@ -80,7 +86,13 @@ jobs:
         run: |
           Set-Location frontend
           flutter create --platforms=windows --project-name=hyrwbz_frontend --overwrite .
+          Write-Host "=== flutter create 完成，恢复源码 ==="
           git checkout -- lib/ pubspec.yaml
+          Write-Host "=== git checkout 完成 ==="
+          Write-Host "main.dart 前 5 行："
+          Get-Content lib/main.dart -TotalCount 5
+          Write-Host "api.dart 是否含 port："
+          Select-String -Path lib/api.dart -Pattern "static int port" | ForEach-Object { $_.Line }
           flutter pub get
           flutter build windows --release
           if (-not (Test-Path build\windows\x64\runner\Release)) { throw "前端编译失败" }
