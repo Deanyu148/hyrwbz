@@ -1,21 +1,17 @@
 name: Build Windows Installer
 
-# 触发方式：
-#   1. 网页手动按钮（Actions 页 → Run workflow，可输入版本号）
-#   2. 推送到 main 分支自动触发
+# 触发方式：仅网页手动按钮（Actions 页 → Run workflow）
+# 每次触发必须填写版本号，无默认值，避免误用 0.1.0
 on:
   workflow_dispatch:
     inputs:
       app_version:
-        description: "版本号（用于生成 Tag，如 0.1.0）"
+        description: "版本号（用于生成 Tag，如 0.1.0、0.2.0）"
         required: true
-        default: "0.1.0"
       is_pre_release:
         description: "是否预发布"
         type: boolean
         default: false
-  push:
-    branches: [main]
 
 permissions:
   contents: write   # 创建 tag 和 release 需要
@@ -33,10 +29,13 @@ jobs:
           INPUT_APP_VERSION: ${{ inputs.app_version }}
           INPUT_IS_PRE_RELEASE: ${{ inputs.is_pre_release }}
         run: |
-          $ver = if ($env:INPUT_APP_VERSION) { $env:INPUT_APP_VERSION } else { "0.1.0" }
+          if (-not $env:INPUT_APP_VERSION) {
+            Write-Error "必须填写版本号（app_version）"
+            exit 1
+          }
           $pre = if ($env:INPUT_IS_PRE_RELEASE -eq "true") { "true" } else { "false" }
           $short = $env:GITHUB_SHA.Substring(0, 7)
-          echo "APP_VERSION=$ver" >> $env:GITHUB_ENV
+          echo "APP_VERSION=$env:INPUT_APP_VERSION" >> $env:GITHUB_ENV
           echo "COMMIT_SHORT=$short" >> $env:GITHUB_ENV
           echo "IS_PRE_RELEASE=$pre" >> $env:GITHUB_ENV
 
