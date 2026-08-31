@@ -101,6 +101,10 @@ $:
             git config --global user.name "CNB Mirror Bot"
             git remote remove github 2>/dev/null || true
             git remote add github "https://x-access-token:${GITHUB_TOKEN}@github.com/Deanyu148/hyrwbz.git"
+            git fetch github "${CNB_BRANCH}" 2>/dev/null || true
+            if git rev-parse "github/${CNB_BRANCH}" >/dev/null 2>&1; then
+              git rebase "github/${CNB_BRANCH}" || { echo "rebase 冲突，已 abort，请人工处理"; git rebase --abort; exit 1; }
+            fi
             git push --force-with-lease github "refs/heads/${CNB_BRANCH}:refs/heads/${CNB_BRANCH}"
             echo "已手动同步到 GitHub: https://github.com/Deanyu148/hyrwbz.git (branch: ${CNB_BRANCH})"
 
@@ -122,5 +126,9 @@ main:
             git config --global user.name "CNB Mirror Bot"
             git remote remove github 2>/dev/null || true
             git remote add github "https://x-access-token:${GITHUB_TOKEN}@github.com/Deanyu148/hyrwbz.git"
+            git fetch github "${CNB_BRANCH}" 2>/dev/null || true
+            if git rev-parse "github/${CNB_BRANCH}" >/dev/null 2>&1; then
+              git rebase "github/${CNB_BRANCH}" || { echo "rebase 冲突，已 abort，请人工处理"; git rebase --abort; exit 1; }
+            fi
             git push --force-with-lease github "refs/heads/${CNB_BRANCH}:refs/heads/${CNB_BRANCH}"
             echo "已同步到 GitHub: https://github.com/Deanyu148/hyrwbz.git (branch: ${CNB_BRANCH})"
