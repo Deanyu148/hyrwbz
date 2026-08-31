@@ -82,7 +82,7 @@ jobs:
           Copy-Item -Force backend\target\release\hyrwbz_backend.exe "$dist\"
           Copy-Item -Force installer\run.bat "$dist\"
 
-      - name: Setup Inno Setup
+      - name: Verify Inno Setup
         shell: pwsh
         run: |
           $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
@@ -93,7 +93,8 @@ jobs:
             Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
           }
           if (-not (Test-Path $isccPath)) { throw "Inno Setup 安装失败" }
-          & $isccPath /?
+          Write-Host "Inno Setup 已就绪: $isccPath"
+          & $isccPath | Out-Null
 
       - name: Build installer
         shell: pwsh
