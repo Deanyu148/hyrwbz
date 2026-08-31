@@ -74,14 +74,30 @@ fn write_sheet(
     title_fmt: &Format,
     center: &Format,
 ) -> Result<()> {
-    let headers = [
+    // 动态计算最大延期数
+    let max_delays = tasks.iter().map(|t| t.delays.len()).max().unwrap_or(0);
+    // 基础表头
+    let base_headers = [
         "序号", "会议号", "任务号", "任务说明", "责任部门", "责任人",
-        "要求完成时间", "实际完成时间", "延期时间1", "延期时间2",
-        "延期时间3", "延期时间…", "说明及备注",
+        "要求完成时间", "实际完成时间",
     ];
-    for (c, h) in headers.iter().enumerate() {
+    // 写基础表头
+    for (c, h) in base_headers.iter().enumerate() {
         sheet.write_with_format(0, c as u16, *h, title_fmt)?;
     }
+    // 动态延期表头：延期1/理由1, 延期2/理由2, ...
+    let mut col = base_headers.len() as u16;
+    for d in 0..max_delays {
+        sheet.write_with_format(0, col, format!("延期{}", d + 1), title_fmt)?;
+        col += 1;
+        sheet.write_with_format(0, col, format!("理由{}", d + 1), title_fmt)?;
+        col += 1;
+    }
+    // 最后是说明及备注
+    let remark_col = col;
+    sheet.write_with_format(0, remark_col, "说明及备注", title_fmt)?;
+
+    // 写数据
     for (i, t) in tasks.iter().enumerate() {
         let r = (i + 1) as u32;
         let seq: u32 = (i + 1) as u32;
@@ -93,14 +109,21 @@ fn write_sheet(
         sheet.write(r, 5, &t.owner)?;
         sheet.write(r, 6, &t.required_date)?;
         sheet.write(r, 7, &t.actual_date)?;
-        // 延期时间1..n
-        let max_d = t.delays.len().max(3);
-        for d in 0..max_d {
-            let val = t.delays.get(d).map(|x| x.delay_date.as_str()).unwrap_or("");
-            sheet.write(r, (8 + d) as u16, val)?;
+        // 延期数据
+        let mut c = 8u16;
+        for d in 0..max_delays {
+            if let Some(delay) = t.delays.get(d) {
+                sheet.write(r, c, &delay.delay_date)?;
+                sheet.write(r, c + 1, &delay.delay_reason)?;
+            } else {
+                sheet.write(r, c, "")?;
+                sheet.write(r, c + 1, "")?;
+            }
+            c += 2;
         }
-        sheet.write(r, 12, &t.remark)?;
+        sheet.write(r, remark_col, &t.remark)?;
     }
+    // 列宽
     sheet.set_column_width(0, 6)?;
     sheet.set_column_width(1, 18)?;
     sheet.set_column_width(2, 8)?;
@@ -109,12 +132,13 @@ fn write_sheet(
     sheet.set_column_width(5, 10)?;
     sheet.set_column_width(6, 14)?;
     sheet.set_column_width(7, 14)?;
-    for c in 8..=11 {
-        sheet.set_column_width(c as u16, 14)?;
+    for cc in 8..remark_col {
+        sheet.set_column_width(cc, 14)?;
     }
-    sheet.set_column_width(12, 30)?;
+    sheet.set_column_width(remark_col, 30)?;
     Ok(())
 }
+
 
 fn default_export_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("APPDATA") {

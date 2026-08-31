@@ -28,7 +28,7 @@ class _FilterScreenState extends State<FilterScreen> {
     _taskNo = TextEditingController(text: widget.initial.taskNo?.toString() ?? '');
     _dept = TextEditingController(text: widget.initial.dept ?? '');
     _owner = TextEditingController(text: widget.initial.owner ?? '');
-    _delayIndex = TextEditingController(text: widget.initial.delayIndex?.toString() ?? '');
+    _delayIndex = TextEditingController(text: (widget.initial.delayIndex ?? 0).toString());
     _requiredFrom = widget.initial.requiredDateFrom;
     _requiredTo = widget.initial.requiredDateTo;
     _actualFrom = widget.initial.actualDateFrom;
@@ -106,8 +106,7 @@ class _FilterScreenState extends State<FilterScreen> {
           onPressed: () {
             int? tn;
             if (_taskNo.text.isNotEmpty) tn = int.tryParse(_taskNo.text);
-            int? di;
-            if (_delayIndex.text.isNotEmpty) di = int.tryParse(_delayIndex.text);
+            int? di = int.tryParse(_delayIndex.text) ?? 0;
             final f = FilterReq(
               meetingNo: _meeting.text.isEmpty ? null : _meeting.text,
               taskNo: tn,

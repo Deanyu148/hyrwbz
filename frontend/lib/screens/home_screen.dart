@@ -162,6 +162,13 @@ class _HomeScreenState extends State<HomeScreen> {
     return p.join(', ');
   }
 
+  Future<void> _viewTask(Task t) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _ViewTaskDialog(task: t),
+    );
+  }
+
   Future<void> _editTask(Task t) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -293,15 +300,14 @@ class _HomeScreenState extends State<HomeScreen> {
                               DataColumn(label: Text('责任人')),
                               DataColumn(label: Text('要求完成时间')),
                               DataColumn(label: Text('实际完成时间')),
-                              DataColumn(label: Text('延期1')),
-                              DataColumn(label: Text('延期2')),
-                              DataColumn(label: Text('延期3')),
-                              DataColumn(label: Text('延期…')),
+                              DataColumn(label: Text('最后延期')),
+                              DataColumn(label: Text('延期理由')),
                               DataColumn(label: Text('说明及备注')),
                             ],
                             rows: _tasks.asMap().entries.map((e) {
                               final i = e.key;
                               final t = e.value;
+                              final lastDelay = t.delays.isNotEmpty ? t.delays.last : null;
                               return DataRow(
                                 selected: _selected.any((x) => x.id == t.id),
                                 onSelectChanged: (v) {
@@ -313,21 +319,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                     }
                                   });
                                 },
-                                onLongPress: () => _editTask(t),
+                                onLongPress: () => _viewTask(t),
                                 cells: [
-                                  DataCell(Text('${i + 1}'), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.meetingNo), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.taskNo.toString()), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.taskDesc), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.dept), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.owner), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.requiredDate), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.actualDate), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.delays.isNotEmpty ? t.delays[0].delayDate : ''), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.delays.length > 1 ? t.delays[1].delayDate : ''), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.delays.length > 2 ? t.delays[2].delayDate : ''), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.delays.length > 3 ? '…(${t.delays.length})' : ''), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.remark), onDoubleTap: () => _editTask(t)),
+                                  DataCell(Text('${i + 1}'), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
+                                  DataCell(Text(t.meetingNo), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
+                                  DataCell(Text(t.taskNo.toString()), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
+                                  DataCell(Text(t.taskDesc), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
+                                  DataCell(Text(t.dept), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
+                                  DataCell(Text(t.owner), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
+                                  DataCell(Text(t.requiredDate), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
+                                  DataCell(Text(t.actualDate), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
+                                  DataCell(Text(lastDelay?.delayDate ?? ''), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
+                                  DataCell(Text(lastDelay?.delayReason ?? ''), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
+                                  DataCell(Text(t.remark), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
                                 ],
                               );
                             }).toList(),
@@ -500,6 +504,225 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
         FilledButton(onPressed: _saving ? null : _save, child: const Text('添加')),
       ],
+    );
+  }
+}
+
+/// 单击条目打开的查看窗口，显示全部延期和理由
+class _ViewTaskDialog extends StatelessWidget {
+  final Task task;
+  const _ViewTaskDialog({required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('条目详情 - ${task.meetingNo}/${task.taskNo}'),
+      content: SizedBox(
+        width: 600,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _row('会议号', task.meetingNo),
+              _row('任务号', task.taskNo.toString()),
+              _row('任务说明', task.taskDesc),
+              _row('责任部门', task.dept),
+              _row('责任人', task.owner),
+              _row('要求完成时间', task.requiredDate),
+              _row('实际完成时间', task.actualDate),
+              _row('说明及备注', task.remark),
+              const Divider(height: 24),
+              Text('延期记录（共 ${task.delays.length} 条）',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              if (task.delays.isEmpty)
+                const Text('无延期记录')
+              else
+                ...task.delays.asMap().entries.map((e) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${e.key + 1}. '),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('延期${e.key + 1}: ${e.value.delayDate}'),
+                            Text('理由${e.key + 1}: ${e.value.delayReason}'),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭')),
+      ],
+    );
+  }
+
+  Widget _row(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 100, child: Text('$label：')),
+          Expanded(child: Text(value.isEmpty ? '-' : value)),
+        ],
+      ),
+    );
+  }
+}
+
+/// 单击条目打开的查看窗口，显示全部延期和理由
+class _ViewTaskDialog extends StatelessWidget {
+  final Task task;
+  const _ViewTaskDialog({required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('条目详情 - ${task.meetingNo}/${task.taskNo}'),
+      content: SizedBox(
+        width: 600,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _row('会议号', task.meetingNo),
+              _row('任务号', task.taskNo.toString()),
+              _row('任务说明', task.taskDesc),
+              _row('责任部门', task.dept),
+              _row('责任人', task.owner),
+              _row('要求完成时间', task.requiredDate),
+              _row('实际完成时间', task.actualDate),
+              _row('说明及备注', task.remark),
+              const Divider(height: 24),
+              Text('延期记录（共 ${task.delays.length} 条）',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              if (task.delays.isEmpty)
+                const Text('无延期记录')
+              else
+                ...task.delays.asMap().entries.map((e) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${e.key + 1}. '),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('延期${e.key + 1}: ${e.value.delayDate}'),
+                            Text('理由${e.key + 1}: ${e.value.delayReason}'),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭')),
+      ],
+    );
+  }
+
+  Widget _row(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 100, child: Text('$label：')),
+          Expanded(child: Text(value.isEmpty ? '-' : value)),
+        ],
+      ),
+    );
+  }
+}
+
+/// 单击条目打开的查看窗口，显示全部延期和理由
+class _ViewTaskDialog extends StatelessWidget {
+  final Task task;
+  const _ViewTaskDialog({required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('条目详情 - ' + task.meetingNo + '/' + task.taskNo.toString()),
+      content: SizedBox(
+        width: 600,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _row('会议号', task.meetingNo),
+              _row('任务号', task.taskNo.toString()),
+              _row('任务说明', task.taskDesc),
+              _row('责任部门', task.dept),
+              _row('责任人', task.owner),
+              _row('要求完成时间', task.requiredDate),
+              _row('实际完成时间', task.actualDate),
+              _row('说明及备注', task.remark),
+              const Divider(height: 24),
+              Text('延期记录（共 ' + task.delays.length.toString() + ' 条）',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              if (task.delays.isEmpty)
+                const Text('无延期记录')
+              else
+                ...task.delays.asMap().entries.map((e) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text((e.key + 1).toString() + '. '),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('延期' + (e.key + 1).toString() + ': ' + e.value.delayDate),
+                            Text('理由' + (e.key + 1).toString() + ': ' + e.value.delayReason),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭')),
+      ],
+    );
+  }
+
+  Widget _row(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 100, child: Text(label + '：')),
+          Expanded(child: Text(value.isEmpty ? '-' : value)),
+        ],
+      ),
     );
   }
 }

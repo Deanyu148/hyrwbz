@@ -12,7 +12,9 @@
 
 #define MyAppName "会议任务管理跟踪系统"
 #define MyAppNameEn "HYRWBZ"
-#define MyAppVersion "0.1.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.1.0"
+#endif
 #define MyAppPublisher "HYRWBZ"
 #define MyAppExeName "hyrwbz_frontend.exe"
 #define MyAppBackendName "hyrwbz_backend.exe"
