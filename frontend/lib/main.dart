@@ -46,7 +46,7 @@ Future<void> _startBackend() async {
 Future<int> _pickFreePort() async {
   final s = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
   final port = s.port;
-  await s.close();
+  s.close();
   return port;
 }
 
