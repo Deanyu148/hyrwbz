@@ -94,6 +94,8 @@ $:
         - https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
       docker:
         image: alpine:3.20
+      runner:
+        cpus: 1
       stages:
         - name: install-git
           script: apk add --no-cache git
@@ -114,6 +116,8 @@ $:
         - https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
       docker:
         image: alpine:3.20
+      runner:
+        cpus: 1
       env:
         GH_REPO: "Deanyu148/hyrwbz"
       stages:
@@ -181,9 +185,8 @@ $:
         - https://cnb.cool/asudad/secret/-/blob/main/hyrwjy.yml
       docker:
         image: python:3.11-slim
-      env:
-        # imports 注入的 CNB_REPO 变量被 CNB 平台禁止，用 TARGET_REPO 中转后清空
-        TARGET_REPO: "asudad/hyrwbz"
+      runner:
+        cpus: 1
       stages:
         - name: run-mirror
           script: |
