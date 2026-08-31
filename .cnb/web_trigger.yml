@@ -1,6 +1,7 @@
 # CNB 网页触发按钮配置
 # 在仓库「流水线」页面展示按钮，点击后触发 .cnb.yml 中对应事件名的流水线。
 # event 名需与 .cnb.yml 中的事件键一致。
+# 权限：仅 1freedom 可点
 
 branch:
   - reg: ^main$
@@ -8,6 +9,8 @@ branch:
       - name: 构建 Windows 安装包
         description: 编译 Rust 后端 + Flutter 前端，用 Inno Setup 打包，自动打 Tag 并发布 Release
         event: web_trigger_build
+        permissions:
+          users: [1freedom]
         inputs:
           APP_VERSION:
             name: 版本号
@@ -28,4 +31,4 @@ branch:
         description: 把当前分支镜像推送到 github.com/Deanyu148/hyrwbz.git 的同名分支
         event: web_trigger_sync_github
         permissions:
-          roles: [master, developer]
+          users: [1freedom]
