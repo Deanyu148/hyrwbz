@@ -1,17 +1,19 @@
 # CNB 流水线
 #
-# 包含两条流水线：
+# 包含三条流水线：
 #   1. build-windows-release：编译 Windows 安装包 + 自动打 Tag + 发布 Release
-#      触发：网页按钮「构建 Windows 安装包」（.cnb/web_trigger.yml）
+#      触发：网页按钮「构建 Windows 安装包」
 #      运行：自托管 Windows 构建机（runner.namespace: group + tags: [windows, x64]）
 #   2. mirror-to-github：把代码镜像推送到 GitHub
 #      触发：push 到 main / 网页按钮「同步到 GitHub」
+#      运行：Linux 官方构建机
+#   3. fetch-gha-logs：拉取 GitHub Actions 最新构建的失败日志
+#      触发：网页按钮「查看 GitHub Actions 日志」
 #      运行：Linux 官方构建机
 #
 # ── 密钥配置 ──────────────────────────────────────────
 # GITHUB_TOKEN 通过 imports 从密钥仓库 asudad/secret 引入
 # 密钥文件：https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
-# 引入后可在 stages 脚本中通过 $GITHUB_TOKEN / ${GITHUB_TOKEN} 引用
 
 # ── 1. 构建 Windows 安装包 ──────────────────────────────
 $:
@@ -100,8 +102,75 @@ $:
             git config --global user.email "cnb-bot@cnb.cool"
             git config --global user.name "CNB Mirror Bot"
             git remote remove github 2>/dev/null || true
-            git remote add github "https://x-access-token:${GITHUB_TOKEN}@github.com/Deanyu148/hyrwbz.git"
-            git push --force github "refs/heads/${CNB_BRANCH}:refs/heads/${CNB_BRANCH}"
+            git remote add github "https://x-access-token:$GITHUB_TOKEN@github.com/Deanyu148/hyrwbz.git"
+            git push --force github "refs/heads/$CNB_BRANCH:refs/heads/$CNB_BRANCH"
+
+  # 网页按钮「查看 GitHub Actions 日志」
+  # 调用 GitHub API 拉取最近一次构建的日志，输出到 CNB 构建日志
+  web_trigger_gha_logs:
+    - name: fetch-gha-logs
+      imports:
+        - https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
+      docker:
+        image: alpine:3.20
+      env:
+        GH_REPO: "Deanyu148/hyrwbz"
+      stages:
+        - name: install-tools
+          script: apk add --no-cache curl jq unzip
+        - name: fetch-latest-run
+          script: |
+            set -e
+            API="https://api.github.com/repos/$GH_REPO/actions/runs?per_page=1"
+            RUN_JSON=$(curl -fsSL -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$API")
+            RUN_ID=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].id // empty')
+            STATUS=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].status // empty')
+            CONCLUSION=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].conclusion // empty')
+            NAME=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].name // empty')
+            HTML_URL=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].html_url // empty')
+            if [ -z "$RUN_ID" ]; then
+              echo "未找到 GitHub Actions 运行记录"
+              exit 0
+            fi
+            echo "================ GitHub Actions 最新构建 ================"
+            echo "Run ID:     $RUN_ID"
+            echo "Name:       $NAME"
+            echo "Status:     $STATUS"
+            echo "Conclusion: $CONCLUSION"
+            echo "URL:        $HTML_URL"
+            echo "========================================================="
+            echo "$RUN_ID" > /tmp/run_id
+        - name: fetch-failed-logs
+          script: |
+            set -e
+            RUN_ID=$(cat /tmp/run_id 2>/dev/null || echo "")
+            if [ -z "$RUN_ID" ]; then exit 0; fi
+            echo ""
+            echo "================ Job 列表 ================"
+            JOBS=$(curl -fsSL -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$GH_REPO/actions/runs/$RUN_ID/jobs")
+            echo "$JOBS" | jq -r '.jobs[] | "Job: (.name) | status: (.status) | conclusion: (.conclusion) | id: (.id)"'
+            echo ""
+            echo "================ 失败 Job 的日志 ================"
+            for JOB_ID in $(echo "$JOBS" | jq -r '.jobs[] | select(.conclusion=="failure") | .id'); do
+              echo "----- Job $JOB_ID 日志 -----"
+              LOG_URL="https://api.github.com/repos/$GH_REPO/actions/jobs/$JOB_ID/logs"
+              curl -fsSL -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$LOG_URL" -o /tmp/logs.zip || {
+                echo "拉取日志失败（可能 run 已过期或权限不足）"
+                continue
+              }
+              rm -rf /tmp/logs && mkdir -p /tmp/logs
+              unzip -o /tmp/logs.zip -d /tmp/logs/ 2>/dev/null || {
+                echo "解压失败"
+                continue
+              }
+              for f in /tmp/logs/*.txt; do
+                [ -f "$f" ] || continue
+                echo "--- $(basename $f) (最后 200 行) ---"
+                tail -200 "$f"
+              done
+            done
+            echo ""
+            echo "================ 日志拉取完毕 ================"
 
 # ── 2. push 触发自动镜像到 GitHub ───────────────────────
 main:
@@ -120,5 +189,5 @@ main:
             git config --global user.email "cnb-bot@cnb.cool"
             git config --global user.name "CNB Mirror Bot"
             git remote remove github 2>/dev/null || true
-            git remote add github "https://x-access-token:${GITHUB_TOKEN}@github.com/Deanyu148/hyrwbz.git"
-            git push --force github "refs/heads/${CNB_BRANCH}:refs/heads/${CNB_BRANCH}"
+            git remote add github "https://x-access-token:$GITHUB_TOKEN@github.com/Deanyu148/hyrwbz.git"
+            git push --force github "refs/heads/$CNB_BRANCH:refs/heads/$CNB_BRANCH"

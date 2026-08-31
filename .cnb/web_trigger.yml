@@ -32,3 +32,8 @@ branch:
         event: web_trigger_sync_github
         permissions:
           users: [1freedom]
+      - name: 查看 GitHub Actions 日志
+        description: 调用 GitHub API 拉取最近一次 Actions 构建的失败日志并输出到构建日志
+        event: web_trigger_gha_logs
+        permissions:
+          users: [1freedom]
