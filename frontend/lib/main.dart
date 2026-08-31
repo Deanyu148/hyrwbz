@@ -80,6 +80,8 @@ class HyrwbzApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+        // 使用系统默认字体（Windows: Microsoft YaHei，Linux: 系统 sans，macOS: system）
+        fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
       ),
       home: const _KillOnClose(child: HomeScreen()),
     );

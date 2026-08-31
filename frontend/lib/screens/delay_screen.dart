@@ -37,7 +37,7 @@ class _DelayScreenState extends State<DelayScreen> {
     try {
       _delays = await Api.listDelays(widget.task.id!);
     } catch (e) {
-      _toast('加载失败: $e');
+      _toast('加载延期失败: $e');
     }
     setState(() => _loading = false);
   }
