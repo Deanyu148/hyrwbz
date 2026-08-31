@@ -110,7 +110,7 @@ $:
 
   # 网页按钮「查看 GitHub Actions 日志」
   # 调用 GitHub API 拉取最近一次构建的日志，输出到 CNB 构建日志
-  web_trigger_gha_logs:
+  api_trigger_gha_logs:
     - name: fetch-gha-logs
       imports:
         - https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
