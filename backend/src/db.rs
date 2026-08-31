@@ -24,16 +24,8 @@ pub async fn init(db_path: &str) -> Result<Db> {
 }
 
 pub fn default_db_path() -> String {
-    let base = dirs_or_cwd();
-    base.join("data.db").to_string_lossy().to_string()
-}
-
-fn dirs_or_cwd() -> std::path::PathBuf {
-    if let Some(d) = std::env::var_os("APPDATA") {
-        return std::path::PathBuf::from(d).join("hyrwbz");
-    }
-    if let Ok(h) = std::env::var("HOME") {
-        return std::path::PathBuf::from(h).join(".hyrwbz");
-    }
-    std::path::PathBuf::from(".")
+    // 数据库放在 exe 同目录下（安装目录），不再用 APPDATA
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dir = exe.parent().unwrap_or_else(|| std::path::Path::new("."));
+    dir.join("data.db").to_string_lossy().to_string()
 }

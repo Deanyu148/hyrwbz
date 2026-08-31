@@ -53,11 +53,8 @@ pub async fn list_snapshots(db: &Db) -> Result<Vec<crate::models::SnapshotInfo>>
 }
 
 fn default_export_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("APPDATA") {
-        return PathBuf::from(d).join("hyrwbz").join("exports");
-    }
-    if let Ok(h) = std::env::var("HOME") {
-        return PathBuf::from(h).join(".hyrwbz").join("exports");
-    }
-    PathBuf::from("./exports")
+    // 数据库导出目录放在 exe 同目录下的 exports/（安装目录）
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    let dir = exe.parent().unwrap_or_else(|| std::path::Path::new("."));
+    dir.join("exports")
 }
