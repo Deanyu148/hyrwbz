@@ -46,7 +46,7 @@ jobs:
               }
             }
           } catch { Write-Host "无法读取上次 tag，用默认 0.1.0" }
-          $tag = "v$newVer-$short"
+          $tag = "v$newVer"
           Write-Host "New tag: $tag"
           echo "APP_VERSION=$newVer" >> $env:GITHUB_ENV
           echo "COMMIT_SHORT=$short" >> $env:GITHUB_ENV
@@ -118,7 +118,8 @@ jobs:
           Write-Host "Exists: $(Test-Path $issPath)"
           if (-not (Test-Path $issPath)) { throw "找不到 .iss 文件: $issPath" }
           Set-Location $root
-          & $isccPath $issPath
+          # 把计算的版本号传给 ISCC，覆盖 .iss 里的 #define MyAppVersion
+          & $isccPath "/DMyAppVersion=$env:APP_VERSION" $issPath
           Get-ChildItem (Join-Path $root "build\installer") -Filter *.exe | Format-List FullName
 
       - name: Upload installer artifact
