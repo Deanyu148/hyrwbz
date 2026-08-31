@@ -45,9 +45,7 @@ $:
         - name: build-frontend
           script: |
             Set-Location frontend
-            if (-not (Test-Path windows)) {
-              flutter create . --platforms=windows --project-name=hyrwbz_frontend
-            }
+            flutter create --platforms=windows --project-name=hyrwbz_frontend --overwrite .
             flutter pub get
             flutter build windows --release
             if (-not (Test-Path "build\windows\x64\runner\Release")) { throw "前端编译失败" }
