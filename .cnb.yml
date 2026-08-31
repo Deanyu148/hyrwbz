@@ -169,32 +169,12 @@ $:
             for JOB_ID in $(echo "$JOBS" | jq -r '.jobs[] | select(.conclusion=="failure") | .id'); do
               echo "----- Job $JOB_ID 日志 -----"
               LOG_URL="https://api.github.com/repos/$GH_REPO/actions/jobs/$JOB_ID/logs"
-              curl -fsSL -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$LOG_URL" -o /tmp/logs.zip || {
+              curl -fsSL -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$LOG_URL" -o /tmp/job_log.txt || {
                 echo "拉取日志失败（可能 run 已过期或权限不足）"
                 continue
               }
-              echo "下载的文件信息："
-              file /tmp/logs.zip
-              ls -la /tmp/logs.zip
-              echo "前 4 字节 magic："
-              head -c 4 /tmp/logs.zip | od -A x -t x1z | head -1
-              rm -rf /tmp/logs && mkdir -p /tmp/logs
-              # 尝试多种解压方式
-              python3 -c "import zipfile; zipfile.ZipFile('/tmp/logs.zip').extractall('/tmp/logs'); print('zipfile 解压成功')" 2>&1 || {
-                echo "python zipfile 失败，尝试 unzip"
-                unzip -o /tmp/logs.zip -d /tmp/logs/ 2>&1 || {
-                  echo "unzip 也失败，尝试 gunzip"
-                  cp /tmp/logs.zip /tmp/logs.gz && gunzip /tmp/logs.gz 2>/dev/null && mv /tmp/logs /tmp/logs/raw.txt || {
-                    echo "所有解压方式都失败"
-                    continue
-                  }
-                }
-              }
-              for f in /tmp/logs/*; do
-                [ -f "$f" ] || continue
-                echo "--- $(basename $f) (最后 200 行) ---"
-                tail -200 "$f"
-              done
+              echo "--- Job $JOB_ID 日志（最后 200 行）---"
+              tail -200 /tmp/job_log.txt
             done
             echo ""
             echo "================ 日志拉取完毕 ================"
