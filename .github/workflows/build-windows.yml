@@ -4,6 +4,8 @@ name: Build Windows Installer
 # 版本号自动递增：patch 满 9 进 minor，minor 满 9 进 major（如 0.1.9 → 0.2.0，0.9.9 → 1.0.0）
 # Tag/Release/安装包文件名/release body 全部只用数字版本号
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       is_pre_release:
