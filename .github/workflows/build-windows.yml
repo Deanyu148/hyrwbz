@@ -1,20 +1,17 @@
 name: Build Windows Installer
 
 # 触发方式：仅网页手动按钮（Actions 页 → Run workflow）
-# 每次触发必须填写版本号，无默认值，避免误用 0.1.0
+# 版本号自动递增 patch（读取上一次 release tag +1），无需手填
 on:
   workflow_dispatch:
     inputs:
-      app_version:
-        description: "版本号（用于生成 Tag，如 0.1.0、0.2.0）"
-        required: true
       is_pre_release:
         description: "是否预发布"
         type: boolean
         default: false
 
 permissions:
-  contents: write   # 创建 tag 和 release 需要
+  contents: write
 
 jobs:
   build:
@@ -23,21 +20,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set version env
+      - name: Compute version (auto-increment patch)
+        id: tag
         shell: pwsh
         env:
-          INPUT_APP_VERSION: ${{ inputs.app_version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_IS_PRE_RELEASE: ${{ inputs.is_pre_release }}
         run: |
-          if (-not $env:INPUT_APP_VERSION) {
-            Write-Error "必须填写版本号（app_version）"
-            exit 1
-          }
           $pre = if ($env:INPUT_IS_PRE_RELEASE -eq "true") { "true" } else { "false" }
           $short = $env:GITHUB_SHA.Substring(0, 7)
-          echo "APP_VERSION=$env:INPUT_APP_VERSION" >> $env:GITHUB_ENV
+          $newVer = "0.1.0"
+          try {
+            $rel = gh release list --repo $env:GITHUB_REPOSITORY --limit 1 --json tagName | ConvertFrom-Json
+            if ($rel) {
+              $lastTag = $rel[0].tagName
+              Write-Host "Last tag: $lastTag"
+              if ($lastTag -match '^v?(d+).(d+).(d+)') {
+                $major = [int]$matches[1]; $minor = [int]$matches[2]; $patch = [int]$matches[3] + 1
+                $newVer = "$major.$minor.$patch"
+              }
+            }
+          } catch { Write-Host "无法读取上次 tag，用默认 0.1.0" }
+          $tag = "v$newVer-$short"
+          Write-Host "New tag: $tag"
+          echo "APP_VERSION=$newVer" >> $env:GITHUB_ENV
           echo "COMMIT_SHORT=$short" >> $env:GITHUB_ENV
           echo "IS_PRE_RELEASE=$pre" >> $env:GITHUB_ENV
+          echo "TAG=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -66,9 +75,7 @@ jobs:
         shell: pwsh
         run: |
           Set-Location frontend
-          # 生成 Windows 平台文件（flutter create 会生成默认 lib/main.dart 等 demo 文件，覆盖我们的源码）
           flutter create --platforms=windows --project-name=hyrwbz_frontend --overwrite .
-          # 关键：从 git 恢复我们写的源码，覆盖 flutter create 生成的 demo
           git checkout -- lib/ pubspec.yaml
           flutter pub get
           flutter build windows --release
@@ -81,7 +88,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$dist\frontend" | Out-Null
           Copy-Item -Recurse -Force frontend\build\windows\x64\runner\Release\* "$dist\frontend\"
           Copy-Item -Force backend\target\release\hyrwbz_backend.exe "$dist\"
-          # 不再需要 run.bat：前端启动时自动拉起后端子进程
 
       - name: Verify Inno Setup
         shell: pwsh
@@ -109,14 +115,6 @@ jobs:
           Set-Location $root
           & $isccPath $issPath
           Get-ChildItem (Join-Path $root "build\installer") -Filter *.exe | Format-List FullName
-
-      - name: Compute tag
-        id: tag
-        shell: pwsh
-        run: |
-          $tag = "v$env:APP_VERSION-$env:COMMIT_SHORT"
-          Write-Host "Tag = $tag"
-          echo "TAG=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
