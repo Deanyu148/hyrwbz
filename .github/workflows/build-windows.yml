@@ -1,0 +1,127 @@
+name: Build Windows Installer
+
+# 触发方式：
+#   1. 网页手动按钮（Actions 页 → Run workflow，可输入版本号）
+#   2. 推送到 main 分支自动触发
+on:
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: "版本号（用于生成 Tag，如 0.1.0）"
+        required: true
+        default: "0.1.0"
+      is_pre_release:
+        description: "是否预发布"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: write   # 创建 tag 和 release 需要
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version env
+        shell: pwsh
+        run: |
+          if ($env:INPUT_APP_VERSION) {
+            echo "APP_VERSION=$env:INPUT_APP_VERSION" >> $env:GITHUB_ENV
+          } else {
+            $ver = "0.1.0"
+            $short = $env:GITHUB_SHA.Substring(0, 7)
+            echo "APP_VERSION=$ver" >> $env:GITHUB_ENV
+            echo "COMMIT_SHORT=$short" >> $env:GITHUB_ENV
+            echo "IS_PRE_RELEASE=false" >> $env:GITHUB_ENV
+          }
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          echo "COMMIT_SHORT=$short" >> $env:GITHUB_ENV
+
+      - name: Show toolchain
+        shell: pwsh
+        run: |
+          Write-Host "Branch: $env:GITHUB_REF_NAME"
+          Write-Host "Commit: $env:COMMIT_SHORT"
+          Write-Host "Version: $env:APP_VERSION"
+          rustc --version
+          cargo --version
+          flutter --version
+
+      - name: Build Rust backend
+        shell: pwsh
+        run: |
+          Set-Location backend
+          cargo build --release
+          if (-not (Test-Path target\release\hyrwbz_backend.exe)) { throw "后端编译失败" }
+
+      - name: Build Flutter frontend
+        shell: pwsh
+        run: |
+          Set-Location frontend
+          if (-not (Test-Path windows)) {
+            flutter create . --platforms=windows --project-name=hyrwbz_frontend
+          }
+          flutter pub get
+          flutter build windows --release
+          if (-not (Test-Path build\windows\x64\runner\Release)) { throw "前端编译失败" }
+
+      - name: Stage installer artifacts
+        shell: pwsh
+        run: |
+          $dist = "installer\dist"
+          New-Item -ItemType Directory -Force -Path "$dist\frontend" | Out-Null
+          Copy-Item -Recurse -Force frontend\build\windows\x64\runner\Release\* "$dist\frontend\"
+          Copy-Item -Force backend\target\release\hyrwbz_backend.exe "$dist\"
+          Copy-Item -Force installer\run.bat "$dist\"
+
+      - name: Setup Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = Get-Command ISCC -ErrorAction SilentlyContinue
+          if (-not $iscc) {
+            $url = "https://files.jrsoftware.org/is/6/innosetup-6.4.3.exe"
+            $installer = "$env:TEMP\inno-setup.exe"
+            Invoke-WebRequest -Uri $url -OutFile $installer
+            Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
+          }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /?
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\hyrwbz.iss
+          Get-ChildItem build\installer -Filter *.exe | Format-List FullName
+
+      - name: Compute tag
+        id: tag
+        shell: pwsh
+        run: |
+          $tag = "v$env:APP_VERSION-$env:COMMIT_SHORT"
+          Write-Host "Tag = $tag"
+          echo "TAG=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyrwbz-installer-${{ steps.tag.outputs.TAG }}
+          path: build/installer/*.exe
+          if-no-files-found: error
+
+      - name: Create tag and release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.TAG }}
+          name: HYRWBZ ${{ steps.tag.outputs.TAG }}
+          body: |
+            会议任务管理跟踪系统 (HYRWBZ) Windows 安装包
+            - 版本: ${{ steps.tag.outputs.TAG }}
+            - 兼容: Windows 10 / Windows 11
+            - 构建: ${{ env.COMMIT_SHORT }}
+            - 安装: 下载 .exe 双击安装即可
+          prerelease: ${{ env.IS_PRE_RELEASE == 'true' }}
+          files: build/installer/*.exe
