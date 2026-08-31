@@ -10,7 +10,7 @@
 #        -> 计算 tag -> git:release 创建 tag 并发布到 Release
 
 main:
-  push:
+  web_trigger_build:
     - name: build-windows-release
       runner:
         namespace: group
