@@ -29,18 +29,22 @@ jobs:
 
       - name: Set version env
         shell: pwsh
+        env:
+          INPUT_APP_VERSION: ${{ inputs.app_version }}
+          INPUT_IS_PRE_RELEASE: ${{ inputs.is_pre_release }}
         run: |
-          if ($env:INPUT_APP_VERSION) {
-            echo "APP_VERSION=$env:INPUT_APP_VERSION" >> $env:GITHUB_ENV
-          } else {
-            $ver = "0.1.0"
-            $short = $env:GITHUB_SHA.Substring(0, 7)
-            echo "APP_VERSION=$ver" >> $env:GITHUB_ENV
-            echo "COMMIT_SHORT=$short" >> $env:GITHUB_ENV
-            echo "IS_PRE_RELEASE=false" >> $env:GITHUB_ENV
-          }
+          $ver = if ($env:INPUT_APP_VERSION) { $env:INPUT_APP_VERSION } else { "0.1.0" }
+          $pre = if ($env:INPUT_IS_PRE_RELEASE -eq "true") { "true" } else { "false" }
           $short = $env:GITHUB_SHA.Substring(0, 7)
+          echo "APP_VERSION=$ver" >> $env:GITHUB_ENV
           echo "COMMIT_SHORT=$short" >> $env:GITHUB_ENV
+          echo "IS_PRE_RELEASE=$pre" >> $env:GITHUB_ENV
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
 
       - name: Show toolchain
         shell: pwsh
