@@ -39,7 +39,7 @@ LZMAUseSeparateProcess=yes
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupIndex: 0; Flags: checkedonce
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: checkedonce
 
 [Files]
 ; Rust 后端二进制
