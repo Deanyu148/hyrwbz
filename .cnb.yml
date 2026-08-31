@@ -46,6 +46,7 @@ $:
           script: |
             Set-Location frontend
             flutter create --platforms=windows --project-name=hyrwbz_frontend --overwrite .
+            git checkout -- lib/ pubspec.yaml
             flutter pub get
             flutter build windows --release
             if (-not (Test-Path "build\windows\x64\runner\Release")) { throw "前端编译失败" }
