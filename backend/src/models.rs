@@ -67,17 +67,6 @@ pub struct SetLockedMeetingReq {
     pub meeting_no: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "op", content = "value")]
-pub enum FilterValue {
-    #[serde(rename = "eq")]
-    Eq(String),
-    #[serde(rename = "like")]
-    Like(String),
-    #[serde(rename = "between")]
-    Between(String, String),
-}
-
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct FilterReq {
     pub meeting_no: Option<String>,

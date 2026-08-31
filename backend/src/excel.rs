@@ -29,7 +29,7 @@ pub async fn export(
     let snaps = sqlx::query("SELECT snapshot_id, saved_at, payload FROM snapshots ORDER BY snapshot_id DESC LIMIT 5")
         .fetch_all(db)
         .await?;
-    let mut sorted: Vec<(String, String)> = snaps.iter().rev().map(|r| {
+    let sorted: Vec<(String, String)> = snaps.iter().rev().map(|r| {
         let saved_at: String = r.try_get("saved_at").unwrap_or_default();
         let payload: String = r.try_get("payload").unwrap_or_default();
         (saved_at, payload)

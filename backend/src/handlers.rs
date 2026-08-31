@@ -1,3 +1,4 @@
+#![allow(unused_assignments)]
 use crate::db::Db;
 use crate::models::*;
 use anyhow::Result;
