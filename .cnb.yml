@@ -178,11 +178,11 @@ $:
   web_trigger_sync_releases:
     - name: sync-releases
       imports:
-        - https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
+        - https://cnb.cool/asudad/secret/-/blob/main/hyrwjy.yml
       docker:
         image: python:3.11-slim
       env:
-        GITHUB_REPO: "Deanyu148/hyrwbz"
+        # imports 注入的 CNB_REPO 变量被 CNB 平台禁止，用 TARGET_REPO 中转后清空
         TARGET_REPO: "asudad/hyrwbz"
       stages:
         - name: run-mirror
