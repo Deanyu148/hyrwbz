@@ -16,9 +16,10 @@ class _FilterScreenState extends State<FilterScreen> {
   late final TextEditingController _dept;
   late final TextEditingController _owner;
   late final TextEditingController _delayIndex;
-  late DateRangeField _required;
-  late DateRangeField _actual;
-  late DateRangeField _delay;
+  // 保存 DateRangeField 的当前值
+  String? _requiredFrom, _requiredTo;
+  String? _actualFrom, _actualTo;
+  String? _delayFrom, _delayTo;
 
   @override
   void initState() {
@@ -28,21 +29,12 @@ class _FilterScreenState extends State<FilterScreen> {
     _dept = TextEditingController(text: widget.initial.dept ?? '');
     _owner = TextEditingController(text: widget.initial.owner ?? '');
     _delayIndex = TextEditingController(text: widget.initial.delayIndex?.toString() ?? '');
-    _required = DateRangeField(
-      initialFrom: widget.initial.requiredDateFrom,
-      initialTo: widget.initial.requiredDateTo,
-      label: '要求完成时间',
-    );
-    _actual = DateRangeField(
-      initialFrom: widget.initial.actualDateFrom,
-      initialTo: widget.initial.actualDateTo,
-      label: '实际完成时间',
-    );
-    _delay = DateRangeField(
-      initialFrom: widget.initial.delayDateFrom,
-      initialTo: widget.initial.delayDateTo,
-      label: '延期时间',
-    );
+    _requiredFrom = widget.initial.requiredDateFrom;
+    _requiredTo = widget.initial.requiredDateTo;
+    _actualFrom = widget.initial.actualDateFrom;
+    _actualTo = widget.initial.actualDateTo;
+    _delayFrom = widget.initial.delayDateFrom;
+    _delayTo = widget.initial.delayDateTo;
   }
 
   @override
@@ -77,11 +69,26 @@ class _FilterScreenState extends State<FilterScreen> {
                 ],
               ),
               const Divider(height: 24),
-              _required,
+              DateRangeField(
+                initialFrom: _requiredFrom,
+                initialTo: _requiredTo,
+                label: '要求完成时间',
+                onChanged: (f, t) { _requiredFrom = f; _requiredTo = t; },
+              ),
               const SizedBox(height: 8),
-              _actual,
+              DateRangeField(
+                initialFrom: _actualFrom,
+                initialTo: _actualTo,
+                label: '实际完成时间',
+                onChanged: (f, t) { _actualFrom = f; _actualTo = t; },
+              ),
               const SizedBox(height: 8),
-              _delay,
+              DateRangeField(
+                initialFrom: _delayFrom,
+                initialTo: _delayTo,
+                label: '延期时间',
+                onChanged: (f, t) { _delayFrom = f; _delayTo = t; },
+              ),
             ],
           ),
         ),
@@ -106,12 +113,12 @@ class _FilterScreenState extends State<FilterScreen> {
               taskNo: tn,
               dept: _dept.text.isEmpty ? null : _dept.text,
               owner: _owner.text.isEmpty ? null : _owner.text,
-              requiredDateFrom: _required.from,
-              requiredDateTo: _required.to,
-              actualDateFrom: _actual.from,
-              actualDateTo: _actual.to,
-              delayDateFrom: _delay.from,
-              delayDateTo: _delay.to,
+              requiredDateFrom: _requiredFrom,
+              requiredDateTo: _requiredTo,
+              actualDateFrom: _actualFrom,
+              actualDateTo: _actualTo,
+              delayDateFrom: _delayFrom,
+              delayDateTo: _delayTo,
               delayIndex: di,
             );
             Navigator.pop(context, f);

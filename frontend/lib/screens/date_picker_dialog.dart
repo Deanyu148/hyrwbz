@@ -104,11 +104,19 @@ class _S extends State<DatePickerDialogWidget> {
 }
 
 /// 起止日期选择行：两个输入框 + 两个日历按钮
+/// 通过 onChanged 回调通知外部当前 from/to 值
 class DateRangeField extends StatefulWidget {
   final String? initialFrom;
   final String? initialTo;
   final String label;
-  const DateRangeField({super.key, this.initialFrom, this.initialTo, this.label = '日期范围'});
+  final void Function(String? from, String? to)? onChanged;
+  const DateRangeField({
+    super.key,
+    this.initialFrom,
+    this.initialTo,
+    this.label = '日期范围',
+    this.onChanged,
+  });
 
   @override
   State<DateRangeField> createState() => _DateRangeFieldState();
@@ -123,10 +131,23 @@ class _DateRangeFieldState extends State<DateRangeField> {
     super.initState();
     _from = TextEditingController(text: widget.initialFrom ?? '');
     _to = TextEditingController(text: widget.initialTo ?? '');
+    _from.addListener(_notify);
+    _to.addListener(_notify);
+  }
+
+  void _notify() {
+    if (widget.onChanged != null) {
+      widget.onChanged!(
+        _from.text.isEmpty ? null : _from.text,
+        _to.text.isEmpty ? null : _to.text,
+      );
+    }
   }
 
   @override
   void dispose() {
+    _from.removeListener(_notify);
+    _to.removeListener(_notify);
     _from.dispose();
     _to.dispose();
     super.dispose();
@@ -161,7 +182,6 @@ class _DateRangeFieldState extends State<DateRangeField> {
             controller: _from,
             decoration: const InputDecoration(hintText: '开始'),
             onTap: () => _pick(true),
-            readOnly: false,
           ),
         ),
         IconButton(icon: const Icon(Icons.date_range), onPressed: () => _pick(true)),
@@ -172,14 +192,10 @@ class _DateRangeFieldState extends State<DateRangeField> {
             controller: _to,
             decoration: const InputDecoration(hintText: '结束'),
             onTap: () => _pick(false),
-            readOnly: false,
           ),
         ),
         IconButton(icon: const Icon(Icons.date_range), onPressed: () => _pick(false)),
       ],
     );
   }
-
-  String? get from => _from.text.isEmpty ? null : _from.text;
-  String? get to => _to.text.isEmpty ? null : _to.text;
 }

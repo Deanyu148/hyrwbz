@@ -1,4 +1,4 @@
-import 'dart:io' show File, Platform, Process, ProcessStartMode, Directory;
+import 'dart:io' show File, Platform, Process, ProcessStartMode, Directory, InternetAddress, RawDatagramSocket;
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
@@ -15,25 +15,20 @@ Future<void> main() async {
     await windowManager.setTitle('会议任务管理跟踪系统');
     await windowManager.setMinimumSize(const Size(900, 600));
   }
-  // 启动后端子进程（隐藏窗口）
   await _startBackend();
   runApp(const HyrwbzApp());
 }
 
 Future<void> _startBackend() async {
-  // 找到 backend exe（开发模式：相对 backend/target/release；打包后：与 frontend exe 同目录）
   final exe = _resolveBackendExe();
   if (exe == null) {
-    // 找不到后端，仍启动 UI（用户能看到错误提示）
     _backendPort = 7790;
     Api.port = 7790;
     return;
   }
-  // 选一个空闲端口
   final port = await _pickFreePort();
   _backendPort = port;
   Api.port = port;
-  // Windows 上确保无新控制台窗口
   final mode = Platform.isWindows ? ProcessStartMode.detached : ProcessStartMode.normal;
   try {
     _backendProcess = await Process.start(
@@ -41,10 +36,7 @@ Future<void> _startBackend() async {
       <String>['--port', port.toString()],
       mode: mode,
     );
-  } catch (_) {
-    // 启动失败也继续，UI 会提示连接失败
-  }
-  // 健康检查（最多 10s）
+  } catch (_) {}
   for (var i = 0; i < 50; i++) {
     if (await Api.health(port: port)) return;
     await Future.delayed(const Duration(milliseconds: 200));
@@ -62,11 +54,8 @@ String? _resolveBackendExe() {
   final exeDir = File(Platform.resolvedExecutable).parent.path;
   final cwd = Directory.current.path;
   final candidates = <String>[
-    // 打包后：与 frontend exe 同目录
     exeDir + '/hyrwbz_backend.exe',
-    // 开发 release
     cwd + '/backend/target/release/hyrwbz_backend.exe',
-    // 开发 debug
     cwd + '/backend/target/debug/hyrwbz_backend.exe',
   ];
   for (final p in candidates) {
@@ -75,7 +64,6 @@ String? _resolveBackendExe() {
   return null;
 }
 
-/// 应用退出（窗口关闭）时杀掉后端子进程
 Future<void> _killBackend() async {
   try {
     _backendProcess.kill();
@@ -98,7 +86,6 @@ class HyrwbzApp extends StatelessWidget {
   }
 }
 
-/// 窗口关闭时杀后端子进程的包装 widget
 class _KillOnClose extends StatefulWidget {
   final Widget child;
   const _KillOnClose({required this.child});
