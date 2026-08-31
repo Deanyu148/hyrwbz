@@ -98,9 +98,16 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
+          $root = $env:GITHUB_WORKSPACE
           $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          & $isccPath "installer\hyrwbz.iss"
-          Get-ChildItem build\installer -Filter *.exe | Format-List FullName
+          $issPath = Join-Path $root "installer\hyrwbz.iss"
+          Write-Host "ISCC: $isccPath"
+          Write-Host "ISS:  $issPath"
+          Write-Host "Exists: $(Test-Path $issPath)"
+          if (-not (Test-Path $issPath)) { throw "找不到 .iss 文件: $issPath" }
+          Set-Location $root
+          & $isccPath $issPath
+          Get-ChildItem (Join-Path $root "build\installer") -Filter *.exe | Format-List FullName
 
       - name: Compute tag
         id: tag
