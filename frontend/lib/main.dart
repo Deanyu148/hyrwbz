@@ -1,6 +1,7 @@
 import 'dart:io' show File, Platform, Process, ProcessStartMode, Directory, InternetAddress, RawDatagramSocket;
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:window_manager/window_manager.dart';
 import 'api.dart';
 import 'screens/home_screen.dart';
@@ -80,9 +81,18 @@ class HyrwbzApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        // 使用系统默认字体（Windows: Microsoft YaHei，Linux: 系统 sans，macOS: system）
         fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
       ),
+      locale: const Locale('zh', 'CN'),
+      supportedLocales: const [
+        Locale('zh', 'CN'),
+        Locale('en', 'US'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       home: const _KillOnClose(child: HomeScreen()),
     );
   }
