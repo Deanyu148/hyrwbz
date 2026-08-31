@@ -126,24 +126,34 @@ $:
         - name: fetch-latest-run
           script: |
             set -e
-            API="https://api.github.com/repos/$GH_REPO/actions/runs?per_page=1"
-            RUN_JSON=$(curl -fsSL -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$API")
-            RUN_ID=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].id // empty')
-            STATUS=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].status // empty')
-            CONCLUSION=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].conclusion // empty')
-            NAME=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].name // empty')
-            HTML_URL=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].html_url // empty')
+            # 若传入 RUN_ID 环境变量则直接用，否则取最新一次
+            if [ -n "$RUN_ID" ]; then
+              API="https://api.github.com/repos/$GH_REPO/actions/runs/$RUN_ID"
+              RUN_JSON=$(curl -fsSL -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$API")
+              STATUS=$(echo "$RUN_JSON" | jq -r '.status // empty')
+              CONCLUSION=$(echo "$RUN_JSON" | jq -r '.conclusion // empty')
+              NAME=$(echo "$RUN_JSON" | jq -r '.name // empty')
+              HTML_URL=$(echo "$RUN_JSON" | jq -r '.html_url // empty')
+            else
+              API="https://api.github.com/repos/$GH_REPO/actions/runs?per_page=1"
+              RUN_JSON=$(curl -fsSL -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$API")
+              RUN_ID=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].id // empty')
+              STATUS=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].status // empty')
+              CONCLUSION=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].conclusion // empty')
+              NAME=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].name // empty')
+              HTML_URL=$(echo "$RUN_JSON" | jq -r '.workflow_runs[0].html_url // empty')
+            fi
             if [ -z "$RUN_ID" ]; then
               echo "未找到 GitHub Actions 运行记录"
               exit 0
             fi
-            echo "================ GitHub Actions 最新构建 ================"
+            echo "================ GitHub Actions 构建 ================"
             echo "Run ID:     $RUN_ID"
             echo "Name:       $NAME"
             echo "Status:     $STATUS"
             echo "Conclusion: $CONCLUSION"
             echo "URL:        $HTML_URL"
-            echo "========================================================="
+            echo "====================================================="
             echo "$RUN_ID" > /tmp/run_id
         - name: fetch-failed-logs
           script: |
