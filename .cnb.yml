@@ -174,11 +174,13 @@ $:
                 continue
               }
               rm -rf /tmp/logs && mkdir -p /tmp/logs
-              unzip -o /tmp/logs.zip -d /tmp/logs/ 2>/dev/null || {
+              # 用 Python zipfile 解压（unzip 偶尔失败），单行避免 YAML 缩进问题
+              python3 -c "import zipfile; zipfile.ZipFile('/tmp/logs.zip').extractall('/tmp/logs')" 2>/dev/null || unzip -o /tmp/logs.zip -d /tmp/logs/ 2>/dev/null || {
                 echo "解压失败"
+                ls -la /tmp/logs.zip
                 continue
               }
-              for f in /tmp/logs/*.txt; do
+              for f in /tmp/logs/*; do
                 [ -f "$f" ] || continue
                 echo "--- $(basename $f) (最后 200 行) ---"
                 tail -200 "$f"
