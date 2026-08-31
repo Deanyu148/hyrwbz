@@ -1,3 +1,7 @@
+// 在 Windows release 模式下使用 GUI 子系统，无控制台窗口
+// debug 模式仍用 console 便于看日志；非 Windows 平台此属性被忽略
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+
 mod db;
 mod excel;
 mod handlers;
@@ -16,14 +20,34 @@ use serde_json::json;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
 
+/// 解析 --port 参数，默认 7790
+fn parse_port() -> u16 {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--port" {
+            if let Some(v) = args.next() {
+                if let Ok(p) = v.parse::<u16>() {
+                    return p;
+                }
+            }
+        }
+    }
+    7790
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // 仅 debug 模式输出 tracing 日志；release 在 GUI 子系统下也无 stdout
+    #[cfg(debug_assertions)]
     tracing_subscriber::fmt().with_env_filter("info").init();
+
+    let port = parse_port();
     let db_path = db::default_db_path();
     let pool = db::init(&db_path).await?;
 
     let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
     let app = Router::new()
+        .route("/api/health", get(|| async { "ok" }))
         .route("/api/tasks", get(handlers::list_tasks).post(handlers::create_task))
         .route("/api/tasks/{id}", put(handlers::update_task).delete(handlers::delete_task))
         .route("/api/tasks/{id}/delays", get(handlers::list_delays).post(handlers::create_delay))
@@ -34,12 +58,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/snapshots", get(handle_list_snapshots))
         .route("/api/db/export", get(handle_db_export))
         .route("/api/db/import", post(handle_db_import))
-        .route("/api/health", get(|| async { "ok" }))
         .layer(cors)
         .with_state(pool);
 
-    let port = 7790u16;
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    #[cfg(debug_assertions)]
     tracing::info!("listening on http://{}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;

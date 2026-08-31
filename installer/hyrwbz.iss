@@ -1,8 +1,13 @@
 ; Inno Setup 脚本 - 会议任务管理跟踪系统 (HYRWBZ)
 ; 兼容 Windows 10 / Windows 11
+;
+; 单 EXE 启动模式：
+;   hyrwbz_frontend.exe 是主入口（桌面图标指向它）
+;   hyrwbz_backend.exe 与之同目录，前端启动时自动拉起后端子进程（隐藏窗口）
+;
 ; 编译前需将编译产物放置到 installer/dist/ 目录下：
-;   installer/dist/hyrwbz_backend.exe   (Rust 后端)
-;   installer/dist/frontend/             (Flutter Windows 构建产物目录)
+;   installer/dist/hyrwbz_backend.exe    (Rust 后端，windows_subsystem=windows 无窗口)
+;   installer/dist/frontend/              (Flutter Windows 构建产物目录)
 ; 由 CI 流水线在编译后自动复制到此目录。
 
 #define MyAppName "会议任务管理跟踪系统"
@@ -42,24 +47,25 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: checkedonce
 
 [Files]
-; Rust 后端二进制
+; Rust 后端二进制（与前端 exe 同目录，前端启动时按相对路径找到）
 Source: "dist\{#MyAppBackendName}"; DestDir: "{app}"; Flags: ignoreversion
 ; Flutter Windows 产物（整个 build/windows/x64/runner/Release 目录结构）
-Source: "dist\frontend\*"; DestDir: "{app}\frontend"; Flags: ignoreversion recursesubdirs createallsubdirs
-; 启动脚本（启动 frontend 前先启动 backend）
-Source: "dist\run.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\frontend\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\run.bat"; IconFilename: "{app}\frontend\{#MyAppExeName}"
+; 桌面图标直接指向 frontend exe，不再需要 run.bat
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\run.bat"; IconFilename: "{app}\frontend\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\run.bat"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; 卸载时结束后端进程
 Filename: "{cmd}"; Parameters: "/C taskkill /F /IM {#MyAppBackendName}"; Flags: runhidden; RunOnceId: "KillBackend"
+; 同时结束前端进程
+Filename: "{cmd}"; Parameters: "/C taskkill /F /IM {#MyAppExeName}"; Flags: runhidden; RunOnceId: "KillFrontend"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"

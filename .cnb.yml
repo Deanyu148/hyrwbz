@@ -55,7 +55,6 @@ $:
             New-Item -ItemType Directory -Force -Path "$dist\frontend" | Out-Null
             Copy-Item -Recurse -Force "frontend\build\windows\x64\runner\Release\*" "$dist\frontend\"
             Copy-Item -Force "backend\target\release\hyrwbz_backend.exe" "$dist\"
-            Copy-Item -Force "installer\run.bat" "$dist\"
         - name: build-installer
           script: |
             $root = $Env:CNB_BUILD_WORKSPACE

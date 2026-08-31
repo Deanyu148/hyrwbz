@@ -79,7 +79,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$dist\frontend" | Out-Null
           Copy-Item -Recurse -Force frontend\build\windows\x64\runner\Release\* "$dist\frontend\"
           Copy-Item -Force backend\target\release\hyrwbz_backend.exe "$dist\"
-          Copy-Item -Force installer\run.bat "$dist\"
+          # 不再需要 run.bat：前端启动时自动拉起后端子进程
 
       - name: Verify Inno Setup
         shell: pwsh
