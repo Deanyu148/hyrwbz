@@ -8,8 +8,6 @@ branch:
       - name: 构建 Windows 安装包
         description: 编译 Rust 后端 + Flutter 前端，用 Inno Setup 打包，自动打 Tag 并发布 Release
         event: web_trigger_build
-        permissions:
-          roles: [master, developer]
         inputs:
           APP_VERSION:
             name: 版本号
