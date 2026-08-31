@@ -58,12 +58,9 @@ $:
             Copy-Item -Force "installer\run.bat" "$dist\"
         - name: build-installer
           script: |
-            $iscc = Get-Command iscc -ErrorAction SilentlyContinue
-            if (-not $iscc) {
-              $iscc = Get-Command "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue
-            }
-            if (-not $iscc) { throw "Inno Setup (ISCC) 未安装" }
-            & $iscc.Source "installer\hyrwbz.iss"
+            $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path $isccPath)) { throw "Inno Setup (ISCC) 未安装: $isccPath" }
+            & $isccPath "installer\hyrwbz.iss"
             Get-ChildItem "build\installer" -Filter *.exe | Format-List FullName
         - name: compute-tag
           script: |

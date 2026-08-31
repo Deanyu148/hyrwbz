@@ -85,19 +85,21 @@ jobs:
       - name: Setup Inno Setup
         shell: pwsh
         run: |
-          $iscc = Get-Command ISCC -ErrorAction SilentlyContinue
-          if (-not $iscc) {
+          $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $isccPath)) {
             $url = "https://files.jrsoftware.org/is/6/innosetup-6.4.3.exe"
             $installer = "$env:TEMP\inno-setup.exe"
             Invoke-WebRequest -Uri $url -OutFile $installer
             Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
           }
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /?
+          if (-not (Test-Path $isccPath)) { throw "Inno Setup 安装失败" }
+          & $isccPath /?
 
       - name: Build installer
         shell: pwsh
         run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\hyrwbz.iss
+          $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $isccPath "installer\hyrwbz.iss"
           Get-ChildItem build\installer -Filter *.exe | Format-List FullName
 
       - name: Compute tag
