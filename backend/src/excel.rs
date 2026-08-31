@@ -12,7 +12,9 @@ pub async fn export(
     filter: FilterReq,
     out_dir: Option<String>,
 ) -> Result<ExportResult> {
-    let tasks = crate::handlers::list_tasks_inner(db, &filter).await?;
+    let tasks = crate::handlers::list_tasks_inner(db, &filter)
+        .await
+        .map_err(|e| anyhow::anyhow!("list tasks: {}", e.1))?;
 
     let mut wb = Workbook::new();
     let title_fmt = Format::new().set_bold().set_background_color("DDDDDD");
@@ -82,7 +84,8 @@ fn write_sheet(
     }
     for (i, t) in tasks.iter().enumerate() {
         let r = (i + 1) as u32;
-        sheet.write_with_format(r, 0, (i + 1), center)?;
+        let seq: u32 = (i + 1) as u32;
+        sheet.write_with_format(r, 0, seq, center)?;
         sheet.write(r, 1, &t.meeting_no)?;
         sheet.write(r, 2, t.task_no)?;
         sheet.write(r, 3, &t.task_desc)?;

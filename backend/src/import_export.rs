@@ -1,7 +1,6 @@
 use crate::db::{self, Db};
 use anyhow::Result;
 use chrono::Local;
-use serde_json::json;
 use sqlx::Row;
 use std::fs;
 use std::path::PathBuf;

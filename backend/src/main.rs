@@ -8,7 +8,7 @@ use axum::{
     extract::{Multipart, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use models::*;
@@ -16,28 +16,18 @@ use serde_json::json;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
 
-#[derive(Clone)]
-struct AppState {
-    db: db::Db,
-}
-
-fn app_state(db: db::Db) -> AppState {
-    AppState { db }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter("info").init();
     let db_path = db::default_db_path();
-    let db = db::init(&db_path).await?;
-    let state = app_state(db);
+    let pool = db::init(&db_path).await?;
 
     let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
     let app = Router::new()
         .route("/api/tasks", get(handlers::list_tasks).post(handlers::create_task))
-        .route("/api/tasks/{id}", axum::routing::put(handlers::update_task).delete(handlers::delete_task))
+        .route("/api/tasks/{id}", put(handlers::update_task).delete(handlers::delete_task))
         .route("/api/tasks/{id}/delays", get(handlers::list_delays).post(handlers::create_delay))
-        .route("/api/delays/{id}", axum::routing::delete(handlers::delete_delay))
+        .route("/api/delays/{id}", delete(handlers::delete_delay))
         .route("/api/locked-meeting", get(handlers::get_locked).put(handlers::set_locked))
         .route("/api/export/excel", post(handle_export_excel))
         .route("/api/snapshot", post(handle_snapshot))
@@ -46,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/db/import", post(handle_db_import))
         .route("/api/health", get(|| async { "ok" }))
         .layer(cors)
-        .with_state(state);
+        .with_state(pool);
 
     let port = 7790u16;
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -56,9 +46,8 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_export_excel(State(s): State<AppState>, Json(body): Json<ExportReq>) -> impl IntoResponse {
-    let res = excel::export(&s.db, body.filter, body.out_dir).await;
-    match res {
+async fn handle_export_excel(State(db): State<db::Db>, Json(body): Json<ExportReq>) -> impl IntoResponse {
+    match excel::export(&db, body.filter, body.out_dir).await {
         Ok(r) => (StatusCode::OK, Json(json!({"path": r.path, "sheets": r.sheets}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -70,29 +59,28 @@ struct ExportReq {
     out_dir: Option<String>,
 }
 
-async fn handle_snapshot(State(s): State<AppState>) -> impl IntoResponse {
-    match import_export::create_snapshot(&s.db).await {
+async fn handle_snapshot(State(db): State<db::Db>) -> impl IntoResponse {
+    match import_export::create_snapshot(&db).await {
         Ok(id) => (StatusCode::OK, Json(json!({"snapshot_id": id}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-async fn handle_list_snapshots(State(s): State<AppState>) -> impl IntoResponse {
-    match import_export::list_snapshots(&s.db).await {
+async fn handle_list_snapshots(State(db): State<db::Db>) -> impl IntoResponse {
+    match import_export::list_snapshots(&db).await {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-async fn handle_db_export(State(s): State<AppState>) -> impl IntoResponse {
-    let _ = s;
+async fn handle_db_export(State(_db): State<db::Db>) -> impl IntoResponse {
     match import_export::export_db_file().await {
         Ok(p) => (StatusCode::OK, Json(json!({"path": p}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-async fn handle_db_import(State(s): State<AppState>, mut mp: Multipart) -> impl IntoResponse {
+async fn handle_db_import(State(_db): State<db::Db>, mut mp: Multipart) -> impl IntoResponse {
     while let Ok(Some(field)) = mp.next_field().await {
         let name = field.name().unwrap_or("").to_string();
         if name == "file" || name == "db" {
