@@ -17,7 +17,7 @@ $:
   web_trigger_sync_github:
     - name: sync-to-github
       imports:
-        - https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
+        - https://cnb.cool/asudad/secret/-/blob/main/hyrwjy.yml
       docker:
         image: alpine:3.20
       runner:
@@ -39,7 +39,7 @@ $:
   api_trigger_gha_logs:
     - name: fetch-gha-logs
       imports:
-        - https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
+        - https://cnb.cool/asudad/secret/-/blob/main/hyrwjy.yml
       docker:
         image: alpine:3.20
       runner:
