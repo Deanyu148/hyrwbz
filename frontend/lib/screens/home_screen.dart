@@ -428,12 +428,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       _resizeColumn(index, details.delta.dx),
                   onHorizontalDragEnd: (_) => _persistColumnWidths(),
                   onHorizontalDragCancel: _persistColumnWidths,
-                  child: Center(
-                    child: Container(
-                      width: 2,
-                      color: Colors.grey.shade400,
-                    ),
-                  ),
+                  child: const SizedBox.expand(),
                 ),
               ),
             ),
