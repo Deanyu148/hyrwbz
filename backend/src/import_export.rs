@@ -1,7 +1,7 @@
 use crate::db::{self, Db};
 use anyhow::Result;
 use chrono::Local;
-use calamine::{open_workbook, Data, Reader, Xlsx};
+use calamine::{Data, Reader, open_workbook_auto};
 use sqlx::Row;
 use std::fs;
 use std::path::PathBuf;
@@ -94,8 +94,10 @@ pub struct ImportResult {
 }
 
 pub async fn import_excel(db: &Db, file_path: &str) -> Result<ImportResult> {
-    let mut workbook: Xlsx<_> = open_workbook(file_path)
-        .map_err(|e| anyhow::anyhow!("open excel: {}", e))?;
+    // 自动识别 xlsx/xls/xlsm 等格式；仅支持 Xlsx 时打开老版二进制 .xls
+    // 会报 "Zip error: ... Could not find EOCD"
+    let mut workbook = open_workbook_auto(file_path)
+        .map_err(|e| anyhow::anyhow!("打开 Excel 失败（请确认文件为有效的 xlsx/xls 格式）: {}", e))?;
     let sheet_names = workbook.sheet_names().to_vec();
     let sheet_name = sheet_names.first().ok_or_else(|| anyhow::anyhow!("no sheets"))?;
     let range = workbook.worksheet_range(sheet_name)
