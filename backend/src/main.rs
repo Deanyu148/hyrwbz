@@ -55,6 +55,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/locked-meeting", get(handlers::get_locked).put(handlers::set_locked))
         .route("/api/export/excel", post(handle_export_excel))
         .route("/api/import/excel", post(handle_import_excel))
+        .route("/api/export/csv", post(handle_export_csv))
+        .route("/api/import/csv", post(handle_import_csv))
         .route("/api/snapshot", post(handle_snapshot))
         .route("/api/snapshots", get(handle_list_snapshots))
         .route("/api/db/export", get(handle_db_export))
@@ -141,11 +143,64 @@ async fn handle_import_excel(State(db): State<db::Db>, mut mp: Multipart) -> imp
                 Ok(b) => b,
                 Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
             };
-            let tmp = std::env::temp_dir().join(format!("hyrwbz_excel_{}.xlsx", uuid::Uuid::new_v4()));
+            // calamine 的 open_workbook_auto 按扩展名选择读取器。
+            // 临时文件不能固定命名为 .xlsx，否则二进制 .xls 会被 Xlsx（zip）
+            // 读取器打开而报 "File not found 'xl/_rels/workbook.xml.rels'" 等错。
+            // 这里按文件头魔数判断真实格式：OLE2(.xls) / zip(.xlsx)，扩展名兜底。
+            let head = &data[..data.len().min(8)];
+            let ext = if head.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) {
+                "xls"
+            } else if head.starts_with(&[0x50, 0x4B]) {
+                "xlsx"
+            } else {
+                let orig = field.file_name().unwrap_or("");
+                match std::path::Path::new(orig)
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_lowercase())
+                    .as_deref()
+                {
+                    Some("xls") => "xls",
+                    _ => "xlsx",
+                }
+            };
+            let tmp = std::env::temp_dir().join(format!("hyrwbz_excel_{}.{}", uuid::Uuid::new_v4(), ext));
             if let Err(e) = std::fs::write(&tmp, &data) {
                 return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
             }
             match import_export::import_excel(&db, tmp.to_string_lossy().as_ref()).await {
+                Ok(r) => {
+                    std::fs::remove_file(&tmp).ok();
+                    return (StatusCode::OK, Json(json!({"imported": r.imported, "errors": r.errors}))).into_response();
+                }
+                Err(e) => {
+                    std::fs::remove_file(&tmp).ok();
+                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+                }
+            }
+        }
+    }
+    (StatusCode::BAD_REQUEST, "no file field".to_string()).into_response()
+}
+
+async fn handle_export_csv(State(db): State<db::Db>, Json(body): Json<ExportReq>) -> impl IntoResponse {
+    match import_export::export_csv(&db, body.filter, body.out_dir).await {
+        Ok(p) => (StatusCode::OK, Json(json!({"path": p}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn handle_import_csv(State(db): State<db::Db>, mut mp: Multipart) -> impl IntoResponse {
+    while let Ok(Some(field)) = mp.next_field().await {
+        if field.name() == Some("file") {
+            let data = match field.bytes().await {
+                Ok(b) => b,
+                Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+            };
+            let tmp = std::env::temp_dir().join(format!("hyrwbz_csv_{}.csv", uuid::Uuid::new_v4()));
+            if let Err(e) = std::fs::write(&tmp, &data) {
+                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+            }
+            match import_export::import_csv(&db, tmp.to_string_lossy().as_ref()).await {
                 Ok(r) => {
                     std::fs::remove_file(&tmp).ok();
                     return (StatusCode::OK, Json(json!({"imported": r.imported, "errors": r.errors}))).into_response();

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show File;
 import 'dart:typed_data';
@@ -239,6 +240,35 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _exportCsv() async {
+    String? outDir;
+    final dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '选择导出目录（取消则使用默认目录）');
+    outDir = dir;
+    try {
+      final res = await Api.exportCsv(_filter, outDir);
+      _toast('已导出: ${res['path']}');
+    } catch (e) {
+      _toast('导出失败: $e');
+    }
+  }
+
+  Future<void> _importCsv() async {
+    final res = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['csv'],
+    );
+    if (res == null || res.files.single.path == null) return;
+    final path = res.files.single.path!;
+    final bytes = await File(path).readAsBytes();
+    try {
+      final result = await Api.importCsv(bytes, res.files.single.name);
+      _toast('导入成功: 共导入 ${result['imported']} 条记录');
+      await _reload();
+    } catch (e) {
+      _toast('导入失败: $e');
+    }
+  }
+
   Future<void> _saveSnapshot() async {
     try {
       await Api.createSnapshot();
@@ -398,10 +428,24 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(icon: const Icon(Icons.refresh), onPressed: _reload, tooltip: '刷新'),
           IconButton(icon: const Icon(Icons.filter_alt), onPressed: _openFilter, tooltip: '统计筛选'),
           IconButton(icon: const Icon(Icons.history), onPressed: _saveSnapshot, tooltip: '保存历史快照'),
-          IconButton(icon: const Icon(Icons.file_download), onPressed: _exportExcel, tooltip: '导出Excel'),
-          IconButton(icon: const Icon(Icons.upload_file), onPressed: _importExcel, tooltip: '导入Excel'),
-          IconButton(icon: const Icon(Icons.download), onPressed: _exportDb, tooltip: '导出数据库'),
-          IconButton(icon: const Icon(Icons.upload), onPressed: _importDb, tooltip: '导入数据库'),
+          _HoverMenuButton(
+            icon: Icons.file_download,
+            tooltip: '导出',
+            items: [
+              _MenuEntry(icon: Icons.table_view, label: '导出Excel', onTap: _exportExcel),
+              _MenuEntry(icon: Icons.text_snippet, label: '导出CSV', onTap: _exportCsv),
+              _MenuEntry(icon: Icons.storage, label: '导出数据库', onTap: _exportDb),
+            ],
+          ),
+          _HoverMenuButton(
+            icon: Icons.upload_file,
+            tooltip: '导入',
+            items: [
+              _MenuEntry(icon: Icons.table_view, label: '导入Excel', onTap: _importExcel),
+              _MenuEntry(icon: Icons.text_snippet, label: '导入CSV', onTap: _importCsv),
+              _MenuEntry(icon: Icons.storage, label: '导入数据库', onTap: _importDb),
+            ],
+          ),
         ],
       ),
       body: Column(
@@ -748,6 +792,86 @@ class _ViewTaskDialog extends StatelessWidget {
           SizedBox(width: 100, child: Text('$label：')),
           Expanded(child: Text(value.isEmpty ? '-' : value)),
         ],
+      ),
+    );
+  }
+}
+
+/// 菜单项数据
+class _MenuEntry {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _MenuEntry({required this.icon, required this.label, required this.onTap});
+}
+
+/// 悬停自动展开的下拉按钮：鼠标移入展开菜单，移出后短暂延迟收起；
+/// 点击按钮也可展开/收起。用于 AppBar 上聚合多个导入/导出入口。
+class _HoverMenuButton extends StatefulWidget {
+  final IconData icon;
+  final String tooltip;
+  final List<_MenuEntry> items;
+  const _HoverMenuButton({required this.icon, required this.tooltip, required this.items});
+
+  @override
+  State<_HoverMenuButton> createState() => _HoverMenuButtonState();
+}
+
+class _HoverMenuButtonState extends State<_HoverMenuButton> {
+  final MenuController _controller = MenuController();
+  Timer? _closeTimer;
+
+  @override
+  void dispose() {
+    _closeTimer?.cancel();
+    super.dispose();
+  }
+
+  void _open() {
+    _closeTimer?.cancel();
+    if (!_controller.isOpen) _controller.open();
+  }
+
+  void _scheduleClose() {
+    _closeTimer?.cancel();
+    _closeTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) _controller.close();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MenuAnchor(
+      controller: _controller,
+      menuChildren: [
+        for (final item in widget.items)
+          MouseRegion(
+            // 鼠标进入菜单项时取消收起计时，避免从按钮移动到菜单途中被关闭
+            onEnter: (_) => _closeTimer?.cancel(),
+            child: MenuItemButton(
+              leadingIcon: Icon(item.icon, size: 18),
+              onPressed: () {
+                _controller.close();
+                item.onTap();
+              },
+              child: Text(item.label),
+            ),
+          ),
+      ],
+      child: MouseRegion(
+        onEnter: (_) => _open(),
+        onExit: (_) => _scheduleClose(),
+        child: IconButton(
+          icon: Icon(widget.icon),
+          tooltip: widget.tooltip,
+          onPressed: () {
+            if (_controller.isOpen) {
+              _controller.close();
+            } else {
+              _open();
+            }
+          },
+        ),
       ),
     );
   }

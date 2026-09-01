@@ -150,4 +150,24 @@ class Api {
     if (r.statusCode != 200) throw Exception(body);
     return jsonDecode(body) as Map<String, dynamic>;
   }
+
+  static Future<Map<String, dynamic>> exportCsv(FilterReq? filter, String? outDir) async {
+    final body = {
+      'filter': filter?.toBody() ?? {},
+      if (outDir != null) 'out_dir': outDir,
+    };
+    final r = await http.post(Uri.parse(base + '/api/export/csv'),
+        headers: {'Content-Type': 'application/json'}, body: jsonEncode(body));
+    if (r.statusCode != 200) throw Exception(r.body);
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> importCsv(Uint8List bytes, String filename) async {
+    final req = http.MultipartRequest('POST', Uri.parse(base + '/api/import/csv'))
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final r = await req.send();
+    final body = await r.stream.bytesToString();
+    if (r.statusCode != 200) throw Exception(body);
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
 }
