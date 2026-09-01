@@ -460,8 +460,8 @@ async fn import_rows(
         }
 
         let task_desc = get_str(col_desc);
-        let dept = get_str(col_dept);
-        let owner = get_str(col_owner);
+        let dept = normalize_english_commas(&get_str(col_dept));
+        let owner = normalize_english_commas(&get_str(col_owner));
         let required_date = get_str(col_required);
         let actual_date = get_str(col_actual);
         let actual_date = if actual_date.is_empty() {
@@ -606,6 +606,16 @@ pub async fn export_csv(
     }
     w.flush()?;
     Ok(path.to_string_lossy().to_string())
+}
+
+fn normalize_english_commas(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '，' | '、' | '﹐' | '﹑' | '､' | '،' => ',',
+            _ => character,
+        })
+        .collect()
 }
 
 fn cell_to_string(cell: &Data) -> String {
@@ -783,7 +793,7 @@ mod tests {
         let rows = vec![
             import_headers(),
             vec![
-                "1", "MEETING-2", "1", "任务", "部门", "责任人", "2026/09/01",
+                "1", "MEETING-2", "1", "任务", "部门一，部门二、部门三", "张三，李四、王五", "2026/09/01",
                 "2026/09/03", "", "继续保留",
             ]
             .into_iter()
@@ -797,13 +807,21 @@ mod tests {
             .unwrap();
 
         let task = sqlx::query(
-            "SELECT id, remark FROM tasks WHERE meeting_no = 'MEETING-2' AND task_no = 1",
+            "SELECT id, remark, dept, owner FROM tasks WHERE meeting_no = 'MEETING-2' AND task_no = 1",
         )
         .fetch_one(&db)
         .await
         .unwrap();
         let task_id: i64 = task.try_get("id").unwrap();
         assert_eq!(task.try_get::<String, _>("remark").unwrap(), "继续保留");
+        assert_eq!(
+            task.try_get::<String, _>("dept").unwrap(),
+            "部门一,部门二,部门三"
+        );
+        assert_eq!(
+            task.try_get::<String, _>("owner").unwrap(),
+            "张三,李四,王五"
+        );
 
         let reason: String =
             sqlx::query_scalar("SELECT delay_reason FROM delays WHERE task_id = ?1")
