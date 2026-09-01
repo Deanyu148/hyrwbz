@@ -199,7 +199,36 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<bool?> _askImportRemarkMode() {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('导入选项'),
+        content: const Text(
+          '是否将导入文件中的“备注”移动到数据库的“延期理由”？\n\n'
+          '仅当该行填写了“延期时间”时才会移动；没有延期时间的备注仍保留在任务备注中。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消导入'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('否，保留备注'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('是，移动'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _importExcel() async {
+    final moveRemarkToDelayReason = await _askImportRemarkMode();
+    if (moveRemarkToDelayReason == null || !mounted) return;
     final res = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx', 'xls'],
@@ -208,7 +237,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final path = res.files.single.path!;
     final bytes = await File(path).readAsBytes();
     try {
-      final result = await Api.importExcel(bytes, res.files.single.name);
+      final result = await Api.importExcel(
+        bytes,
+        res.files.single.name,
+        moveRemarkToDelayReason: moveRemarkToDelayReason,
+      );
       _toast('导入成功: 共导入 ${result['imported']} 条记录');
       await _reload();
     } catch (e) {
@@ -229,6 +262,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _importCsv() async {
+    final moveRemarkToDelayReason = await _askImportRemarkMode();
+    if (moveRemarkToDelayReason == null || !mounted) return;
     final res = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['csv'],
@@ -237,7 +272,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final path = res.files.single.path!;
     final bytes = await File(path).readAsBytes();
     try {
-      final result = await Api.importCsv(bytes, res.files.single.name);
+      final result = await Api.importCsv(
+        bytes,
+        res.files.single.name,
+        moveRemarkToDelayReason: moveRemarkToDelayReason,
+      );
       _toast('导入成功: 共导入 ${result['imported']} 条记录');
       await _reload();
     } catch (e) {

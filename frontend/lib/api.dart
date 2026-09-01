@@ -158,10 +158,17 @@ class Api {
     return AttachmentDownload((reply.result as Map)['filename'] as String, reply.binary);
   }
 
-  static Future<Map<String, dynamic>> importExcel(Uint8List bytes, String filename) async {
+  static Future<Map<String, dynamic>> importExcel(
+    Uint8List bytes,
+    String filename, {
+    required bool moveRemarkToDelayReason,
+  }) async {
     final reply = await _call(
       'import.excel',
-      params: {'filename': filename},
+      params: {
+        'filename': filename,
+        'move_remark_to_delay_reason': moveRemarkToDelayReason,
+      },
       binary: bytes,
       timeout: const Duration(minutes: 5),
     );
@@ -177,10 +184,17 @@ class Api {
     return Map<String, dynamic>.from(reply.result as Map);
   }
 
-  static Future<Map<String, dynamic>> importCsv(Uint8List bytes, String filename) async {
+  static Future<Map<String, dynamic>> importCsv(
+    Uint8List bytes,
+    String filename, {
+    required bool moveRemarkToDelayReason,
+  }) async {
     final reply = await _call(
       'import.csv',
-      params: {'filename': filename},
+      params: {
+        'filename': filename,
+        'move_remark_to_delay_reason': moveRemarkToDelayReason,
+      },
       binary: bytes,
       timeout: const Duration(minutes: 5),
     );

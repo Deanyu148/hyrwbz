@@ -108,7 +108,11 @@ pub struct ImportResult {
     pub errors: Vec<String>,
 }
 
-pub async fn import_excel(db: &Db, file_path: &str) -> Result<ImportResult> {
+pub async fn import_excel(
+    db: &Db,
+    file_path: &str,
+    move_remark_to_delay_reason: bool,
+) -> Result<ImportResult> {
     // 自动识别 xlsx/xls/xlsm 等格式；仅支持 Xlsx 时打开老版二进制 .xls
     // 会报 "Zip error: ... Could not find EOCD"
     let mut workbook = match open_workbook_auto(file_path) {
@@ -141,7 +145,7 @@ pub async fn import_excel(db: &Db, file_path: &str) -> Result<ImportResult> {
         .rows()
         .map(|r| r.iter().map(cell_to_string).collect())
         .collect();
-    import_rows(db, rows).await
+    import_rows(db, rows, move_remark_to_delay_reason).await
 }
 
 /// 修复缺少 xl/_rels/workbook.xml.rels 的 xlsx：按 xl/workbook.xml 中的
@@ -218,7 +222,11 @@ fn extract_xml_attr(tag: &str, attr: &str) -> Option<String> {
 
 /// 导入 CSV（第一行为表头）。
 /// 自动处理 UTF-8/GBK 编码（国内 Excel 另存的 CSV 常为 GBK），兼容 UTF-8 BOM。
-pub async fn import_csv(db: &Db, file_path: &str) -> Result<ImportResult> {
+pub async fn import_csv(
+    db: &Db,
+    file_path: &str,
+    move_remark_to_delay_reason: bool,
+) -> Result<ImportResult> {
     let bytes = fs::read(file_path)?;
     let (text, _, had_errors) = encoding_rs::UTF_8.decode(&bytes);
     let text = if had_errors {
@@ -236,11 +244,15 @@ pub async fn import_csv(db: &Db, file_path: &str) -> Result<ImportResult> {
         .filter_map(|r| r.ok())
         .map(|r| r.iter().map(|s| s.to_string()).collect())
         .collect();
-    import_rows(db, rows).await
+    import_rows(db, rows, move_remark_to_delay_reason).await
 }
 
 /// 按模板列（序号/会议纪要号/任务序号/任务内容/...）导入数据行，Excel 与 CSV 共用。
-async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
+async fn import_rows(
+    db: &Db,
+    rows: Vec<Vec<String>>,
+    move_remark_to_delay_reason: bool,
+) -> Result<ImportResult> {
     if rows.is_empty() {
         return Ok(ImportResult {
             imported: 0,
@@ -257,7 +269,7 @@ async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
     let col_dept = find_col("责任部门");
     let col_owner = find_col("责任人");
     let col_required = find_col("计划完成时间");
-    let col_delay = find_col("延期时间");
+    let col_delay = find_col("延期时间").or_else(|| find_col("延期1"));
     let col_actual = find_col("实际完成时间");
     let col_remark = find_col("备注");
 
@@ -288,6 +300,10 @@ async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
         let actual_date = get_str(col_actual);
         let remark = get_str(col_remark);
         let delay_date = get_str(col_delay);
+        // 延期理由依赖延期记录。没有延期时间时保留任务备注，避免内容丢失。
+        let move_remark = move_remark_to_delay_reason && !delay_date.is_empty();
+        let task_remark = if move_remark { "" } else { remark.as_str() };
+        let delay_reason = if move_remark { remark.as_str() } else { "" };
 
         let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
@@ -310,7 +326,7 @@ async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
             .bind(&owner)
             .bind(&required_date)
             .bind(&actual_date)
-            .bind(&remark)
+            .bind(task_remark)
             .bind(&now)
             .bind(id)
             .execute(db)
@@ -321,7 +337,7 @@ async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
                 "INSERT INTO tasks (meeting_no, task_no, task_desc, dept, owner, required_date, actual_date, remark, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
             ).bind(&meeting_no).bind(task_no).bind(&task_desc).bind(&dept)
-            .bind(&owner).bind(&required_date).bind(&actual_date).bind(&remark)
+            .bind(&owner).bind(&required_date).bind(&actual_date).bind(task_remark)
             .bind(&now).execute(db).await?;
             res.last_insert_rowid()
         };
@@ -333,12 +349,27 @@ async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
                     .bind(&delay_date)
                     .fetch_optional(db)
                     .await?;
-            if existing_delay.is_none() {
+            if let Some(delay_id) = existing_delay {
+                if move_remark && !delay_reason.is_empty() {
+                    sqlx::query("UPDATE delays SET delay_reason = ?1 WHERE id = ?2")
+                        .bind(delay_reason)
+                        .bind(delay_id)
+                        .execute(db)
+                        .await?;
+                }
+            } else {
                 sqlx::query(
                     "INSERT INTO delays (task_id, meeting_no, task_no, delay_date, delay_reason, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                ).bind(task_id).bind(&meeting_no).bind(task_no).bind(&delay_date).bind("").bind(&now)
-                .execute(db).await?;
+                )
+                .bind(task_id)
+                .bind(&meeting_no)
+                .bind(task_no)
+                .bind(&delay_date)
+                .bind(delay_reason)
+                .bind(&now)
+                .execute(db)
+                .await?;
             }
         }
 
@@ -414,5 +445,193 @@ fn cell_to_string(cell: &Data) -> String {
         Data::Float(f) => f.to_string(),
         Data::DateTime(d) => d.to_string(),
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn import_headers() -> Vec<String> {
+        [
+            "序号",
+            "会议纪要号",
+            "任务序号",
+            "任务内容",
+            "责任部门",
+            "责任人",
+            "计划完成时间",
+            "延期时间",
+            "实际完成时间",
+            "备注",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    }
+
+    async fn test_db(name: &str) -> (Db, PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "hyrwbz_import_{name}_{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = crate::db::init(path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+        (db, path)
+    }
+
+    fn write_excel(path: &std::path::Path, rows: &[Vec<String>]) {
+        let mut workbook = rust_xlsxwriter::Workbook::new();
+        let sheet = workbook.add_worksheet();
+        for (row_index, row) in rows.iter().enumerate() {
+            for (column_index, value) in row.iter().enumerate() {
+                sheet
+                    .write(row_index as u32, column_index as u16, value)
+                    .unwrap();
+            }
+        }
+        workbook.save(path).unwrap();
+    }
+
+    fn write_csv(path: &std::path::Path, rows: &[Vec<String>]) {
+        let mut writer = csv::Writer::from_path(path).unwrap();
+        for row in rows {
+            writer.write_record(row).unwrap();
+        }
+        writer.flush().unwrap();
+    }
+
+    #[tokio::test]
+    async fn excel_import_can_move_remark_to_delay_reason() {
+        let (db, db_path) = test_db("move_remark").await;
+        let input_path = std::env::temp_dir().join(format!(
+            "hyrwbz_import_{}.xlsx",
+            uuid::Uuid::new_v4()
+        ));
+        let rows = vec![
+            import_headers(),
+            vec![
+                "1", "MEETING-1", "1", "任务", "部门", "责任人", "2026/09/01",
+                "2026/09/02", "", "需要延期",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+            vec![
+                "2", "MEETING-1", "2", "无延期任务", "部门", "责任人", "2026/09/01",
+                "", "", "无延期时保留备注",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        ];
+        write_excel(&input_path, &rows);
+
+        let result = import_excel(&db, input_path.to_string_lossy().as_ref(), true)
+            .await
+            .unwrap();
+        assert_eq!(result.imported, 2);
+
+        let moved_task = sqlx::query(
+            "SELECT id, remark FROM tasks WHERE meeting_no = 'MEETING-1' AND task_no = 1",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let task_id: i64 = moved_task.try_get("id").unwrap();
+        let task_remark: String = moved_task.try_get("remark").unwrap();
+        assert_eq!(task_remark, "");
+
+        let delay =
+            sqlx::query("SELECT delay_date, delay_reason FROM delays WHERE task_id = ?1")
+                .bind(task_id)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(
+            delay.try_get::<String, _>("delay_date").unwrap(),
+            "2026/09/02"
+        );
+        assert_eq!(
+            delay.try_get::<String, _>("delay_reason").unwrap(),
+            "需要延期"
+        );
+
+        let kept_remark: String = sqlx::query_scalar(
+            "SELECT remark FROM tasks WHERE meeting_no = 'MEETING-1' AND task_no = 2",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(kept_remark, "无延期时保留备注");
+
+        db.close().await;
+        std::fs::remove_file(db_path).ok();
+        std::fs::remove_file(input_path).ok();
+    }
+
+    #[tokio::test]
+    async fn csv_import_respects_remark_move_option() {
+        let (db, db_path) = test_db("keep_remark").await;
+        let input_path = std::env::temp_dir().join(format!(
+            "hyrwbz_import_{}.csv",
+            uuid::Uuid::new_v4()
+        ));
+        let rows = vec![
+            import_headers(),
+            vec![
+                "1", "MEETING-2", "1", "任务", "部门", "责任人", "2026/09/01",
+                "2026/09/03", "", "继续保留",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        ];
+        write_csv(&input_path, &rows);
+
+        import_csv(&db, input_path.to_string_lossy().as_ref(), false)
+            .await
+            .unwrap();
+
+        let task = sqlx::query(
+            "SELECT id, remark FROM tasks WHERE meeting_no = 'MEETING-2' AND task_no = 1",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let task_id: i64 = task.try_get("id").unwrap();
+        assert_eq!(task.try_get::<String, _>("remark").unwrap(), "继续保留");
+
+        let reason: String =
+            sqlx::query_scalar("SELECT delay_reason FROM delays WHERE task_id = ?1")
+                .bind(task_id)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(reason, "");
+
+        // 再次导入同一文件并启用移动选项，应清空任务备注并更新已有延期记录。
+        import_csv(&db, input_path.to_string_lossy().as_ref(), true)
+            .await
+            .unwrap();
+        let task_remark: String = sqlx::query_scalar(
+            "SELECT remark FROM tasks WHERE meeting_no = 'MEETING-2' AND task_no = 1",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(task_remark, "");
+        let moved_reason: String =
+            sqlx::query_scalar("SELECT delay_reason FROM delays WHERE task_id = ?1")
+                .bind(task_id)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(moved_reason, "继续保留");
+
+        db.close().await;
+        std::fs::remove_file(db_path).ok();
+        std::fs::remove_file(input_path).ok();
     }
 }

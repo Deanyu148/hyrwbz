@@ -59,6 +59,8 @@ struct ExportParam {
 #[derive(Debug, Deserialize)]
 struct ImportParam {
     filename: String,
+    #[serde(default)]
+    move_remark_to_delay_reason: bool,
 }
 #[derive(Debug, Deserialize)]
 struct UploadParam {
@@ -132,14 +134,26 @@ async fn dispatch(db: &Db, request: RequestHeader, binary: Vec<u8>) -> Frame {
                 let param: ImportParam = decode(request.params)?;
                 let ext = excel_extension(&param.filename, &binary);
                 let path = write_temp("excel", ext, &binary)?;
-                let result = import_export::import_excel(db, path.to_string_lossy().as_ref()).await.map_err(service::ServiceError::internal);
+                let result = import_export::import_excel(
+                    db,
+                    path.to_string_lossy().as_ref(),
+                    param.move_remark_to_delay_reason,
+                )
+                .await
+                .map_err(service::ServiceError::internal);
                 std::fs::remove_file(&path).ok();
                 serde_json::to_value(result?).map_err(service::ServiceError::internal)?
             }
             "import.csv" => {
-                let _: ImportParam = decode(request.params)?;
+                let param: ImportParam = decode(request.params)?;
                 let path = write_temp("csv", "csv", &binary)?;
-                let result = import_export::import_csv(db, path.to_string_lossy().as_ref()).await.map_err(service::ServiceError::internal);
+                let result = import_export::import_csv(
+                    db,
+                    path.to_string_lossy().as_ref(),
+                    param.move_remark_to_delay_reason,
+                )
+                .await
+                .map_err(service::ServiceError::internal);
                 std::fs::remove_file(&path).ok();
                 serde_json::to_value(result?).map_err(service::ServiceError::internal)?
             }
