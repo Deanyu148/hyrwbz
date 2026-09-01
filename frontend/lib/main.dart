@@ -16,8 +16,7 @@ Future<void> main() async {
     await windowManager.ensureInitialized();
     await windowManager.setTitle('会议任务管理跟踪系统');
     await windowManager.setMinimumSize(const Size(900, 600));
-    // 拦截窗口关闭，保证 onWindowClose 有机会保存窗口状态并清理后端进程
-    await windowManager.setPreventClose(true);
+    // 不拦截系统关闭消息。退出清理在后台执行，避免关闭回调阻塞原生窗口。
     // Restore saved window size and position
     final prefs = await SharedPreferences.getInstance();
     final w = prefs.getDouble('window_width');
@@ -80,16 +79,26 @@ String? _resolveBackendExe() {
   return null;
 }
 
+Future<void> _saveWindowState() async {
+  try {
+    final size = await windowManager.getSize();
+    final pos = await windowManager.getPosition();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('window_width', size.width);
+    await prefs.setDouble('window_height', size.height);
+    await prefs.setDouble('window_x', pos.dx);
+    await prefs.setDouble('window_y', pos.dy);
+  } catch (_) {}
+}
 Future<void> _killBackend() async {
   final process = _backendProcess;
   if (process == null) return;
 
-  // 先清空引用，避免关闭事件重复触发时重复执行 taskkill。
+  // 先清空引用，避免关闭事件重复触发时重复执行清理。
   _backendProcess = null;
   try {
     if (Platform.isWindows) {
-      // detached 进程用 taskkill 连同子进程一起强制结束，比 Process.kill 可靠。
-      // 关闭流程不能无限等待外部命令，否则窗口会表现为“卡死”。
+      // 后端自身也有 parent-pid 看门狗；这里尽力立即结束，但不阻塞窗口退出。
       await Process.run(
         'taskkill',
         <String>['/PID', process.pid.toString(), '/T', '/F'],
@@ -150,30 +159,14 @@ class _KillOnCloseState extends State<_KillOnClose> with WindowListener {
   }
 
   @override
-  void onWindowClose() async {
-    // Windows 关闭消息可能重复到达；只允许第一个关闭流程继续。
+  void onWindowClose() {
+    // 系统关闭消息不能等待异步清理，否则窗口会一直处于“正在关闭”状态。
     if (_isClosing) return;
     _isClosing = true;
 
-    try {
-      // Save window size and position before closing
-      try {
-        final size = await windowManager.getSize();
-        final pos = await windowManager.getPosition();
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setDouble('window_width', size.width);
-        await prefs.setDouble('window_height', size.height);
-        await prefs.setDouble('window_x', pos.dx);
-        await prefs.setDouble('window_y', pos.dy);
-      } catch (_) {}
-      await _killBackend();
-    } finally {
-      // destroy() 后不应再次被 setPreventClose 拦截，否则关闭会陷入循环。
-      try {
-        await windowManager.setPreventClose(false);
-        await windowManager.destroy();
-      } catch (_) {}
-    }
+    // 关闭回调不等待任何异步操作，避免阻塞原生窗口销毁。
+    unawaited(_saveWindowState());
+    unawaited(_killBackend());
   }
 
   @override
