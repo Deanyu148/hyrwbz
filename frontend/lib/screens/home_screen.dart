@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import '../api.dart';
 import '../models.dart';
 import '../table_layout.dart';
+import '../table_layout_store.dart';
 import 'edit_screen.dart';
 import 'delay_screen.dart';
 import 'filter_screen.dart';
@@ -28,11 +29,21 @@ class _HomeScreenState extends State<HomeScreen> {
   String _filterSummary = '';
   bool _backendOk = true;
   final List<Task> _selected = [];
+  List<double>? _columnWidths;
+  List<double>? _savedColumnWidths;
+  double? _tableAvailableWidth;
 
   @override
   void initState() {
     super.initState();
+    _savedColumnWidths = TaskColumnWidthStore.load();
     _ensureBackend();
+  }
+
+  @override
+  void dispose() {
+    _persistColumnWidths();
+    super.dispose();
   }
 
 
@@ -319,7 +330,40 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ---- Responsive table builders ----
+  // ---- Responsive and resizable table builders ----
+
+  List<double> _resolveColumnWidths(double availableWidth) {
+    final widthChanged = _tableAvailableWidth == null ||
+        (_tableAvailableWidth! - availableWidth).abs() > 0.01;
+    if (_columnWidths == null || widthChanged) {
+      _columnWidths = fitTaskColumnWidths(
+        availableWidth,
+        _columnWidths ?? _savedColumnWidths,
+      );
+      _savedColumnWidths = null;
+      _tableAvailableWidth = availableWidth;
+    }
+    return _columnWidths!;
+  }
+
+  void _resizeColumn(int dividerIndex, double delta) {
+    final widths = _columnWidths;
+    final availableWidth = _tableAvailableWidth;
+    if (widths == null || availableWidth == null || delta == 0) return;
+    setState(() {
+      _columnWidths = resizeTaskColumnWidths(
+        widths,
+        dividerIndex,
+        delta,
+        availableWidth,
+      );
+    });
+  }
+
+  void _persistColumnWidths() {
+    final widths = _columnWidths;
+    if (widths != null) TaskColumnWidthStore.saveSync(widths);
+  }
 
   Widget _buildHeaderRow(List<double> widths) {
     return Container(
@@ -343,19 +387,56 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           for (int i = 0; i < _columnLabels.length; i++)
-            _buildHeaderCell(widths[i], _columnLabels[i]),
+            _buildHeaderCell(widths[i], _columnLabels[i], i),
         ],
       ),
     );
   }
 
-  Widget _buildHeaderCell(double width, String label) {
+  Widget _buildHeaderCell(double width, String label, int index) {
     return SizedBox(
       width: width,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
-        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.bold)),
+      child: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              border: Border(
+                right: BorderSide(color: Colors.grey.shade300),
+              ),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+            alignment: Alignment.centerLeft,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          if (index < _columnLabels.length - 1)
+            Positioned(
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: 9,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeLeftRight,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragUpdate: (details) =>
+                      _resizeColumn(index, details.delta.dx),
+                  onHorizontalDragEnd: (_) => _persistColumnWidths(),
+                  onHorizontalDragCancel: _persistColumnWidths,
+                  child: Center(
+                    child: Container(
+                      width: 2,
+                      color: Colors.grey.shade400,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -388,8 +469,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           for (int i = 0; i < cellTexts.length; i++)
-            SizedBox(
+            Container(
               width: widths[i],
+              decoration: BoxDecoration(
+                border: Border(
+                  right: BorderSide(color: Colors.grey.shade200),
+                ),
+              ),
               child: GestureDetector(
                 onTap: () => _viewTask(t),
                 onDoubleTap: () => _editTask(t),
@@ -497,7 +583,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? const Center(child: Text('暂无数据，点击「添加条目」开始'))
                     : LayoutBuilder(
                         builder: (context, constraints) {
-                          final widths = computeTaskColumnWidths(constraints.maxWidth);
+                          final widths = _resolveColumnWidths(constraints.maxWidth);
                           return Column(
                             children: [
                               _buildHeaderRow(widths),
