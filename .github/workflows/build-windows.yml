@@ -83,10 +83,11 @@ jobs:
           cargo --version
           flutter --version
 
-      - name: Build Rust backend
+      - name: Test and build Rust backend
         shell: pwsh
         run: |
           Set-Location backend
+          cargo test --all-targets
           cargo build --release
           if (-not (Test-Path target\release\hyrwbz_backend.exe)) { throw "后端编译失败" }
 
@@ -95,8 +96,10 @@ jobs:
         run: |
           Set-Location frontend
           flutter create --platforms=windows --project-name=hyrwbz_frontend --overwrite .
-          git checkout -- lib/ pubspec.yaml
+          git checkout -- lib/ test/ pubspec.yaml
           flutter pub get
+          flutter analyze
+          flutter test
           flutter build windows --release
           if (-not (Test-Path build\windows\x64\runner\Release)) { throw "前端编译失败" }
 

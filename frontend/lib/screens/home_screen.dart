@@ -1,12 +1,11 @@
-import 'dart:async';
-import 'dart:convert';
+
 import 'dart:io' show File;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../api.dart';
 import '../models.dart';
+import '../table_layout.dart';
 import 'edit_screen.dart';
 import 'delay_screen.dart';
 import 'filter_screen.dart';
@@ -23,50 +22,24 @@ class _HomeScreenState extends State<HomeScreen> {
     '序号', '会议纪要号', '任务序号', '任务内容', '责任部门',
     '责任人', '计划完成时间', '实际完成时间', '最后延期', '延期理由', '附件', '备注',
   ];
-  static const _defaultWidths = [
-    60.0, 120.0, 80.0, 200.0, 100.0, 80.0, 120.0, 120.0, 120.0, 150.0, 60.0, 150.0
-  ];
-
   List<Task> _tasks = [];
   bool _loading = true;
   FilterReq _filter = const FilterReq();
   String _filterSummary = '';
   bool _backendOk = true;
-  bool _checking = false;
   final List<Task> _selected = [];
-  List<double> _colWidths = List.from(_defaultWidths);
 
   @override
   void initState() {
     super.initState();
-    _loadColWidths();
     _ensureBackend();
   }
 
-  Future<void> _loadColWidths() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('col_widths');
-    if (saved != null) {
-      try {
-        final list = (jsonDecode(saved) as List).map((e) => (e as num).toDouble()).toList();
-        if (list.length == _defaultWidths.length) {
-          setState(() => _colWidths = list);
-        }
-      } catch (_) {}
-    }
-  }
-
-  Future<void> _saveColWidths() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('col_widths', jsonEncode(_colWidths));
-  }
 
   Future<void> _ensureBackend() async {
-    setState(() => _checking = true);
     final ok = await Api.health();
     setState(() {
       _backendOk = ok;
-      _checking = false;
     });
     if (!ok) {
       if (!mounted) return;
@@ -307,15 +280,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ---- Custom resizable table builders ----
+  // ---- Responsive table builders ----
 
-  Widget _buildHeaderRow() {
+  Widget _buildHeaderRow(List<double> widths) {
     return Container(
       color: Colors.grey[200],
       child: Row(
         children: [
           SizedBox(
-            width: 48,
+            width: taskSelectionWidth,
             child: Checkbox(
               value: _tasks.isNotEmpty && _selected.length == _tasks.length,
               onChanged: (v) {
@@ -331,69 +304,37 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           for (int i = 0; i < _columnLabels.length; i++)
-            _buildHeaderCell(i, _columnLabels[i]),
+            _buildHeaderCell(widths[i], _columnLabels[i]),
         ],
       ),
     );
   }
 
-  Widget _buildHeaderCell(int index, String label) {
+  Widget _buildHeaderCell(double width, String label) {
     return SizedBox(
-      width: _colWidths[index],
-      child: Stack(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
-            child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          Positioned(
-            right: 0,
-            top: 0,
-            bottom: 0,
-            child: MouseRegion(
-              cursor: SystemMouseCursors.resizeColumn,
-              child: GestureDetector(
-                onHorizontalDragUpdate: (details) {
-                  setState(() {
-                    _colWidths[index] = (_colWidths[index] + details.delta.dx).clamp(40.0, 500.0);
-                  });
-                },
-                onHorizontalDragEnd: (_) => _saveColWidths(),
-                child: Container(
-                  width: 6,
-                  color: Colors.transparent,
-                ),
-              ),
-            ),
-          ),
-        ],
+      width: width,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.bold)),
       ),
     );
   }
 
-  Widget _buildDataRow(int index, Task t) {
+  Widget _buildDataRow(int index, Task t, List<double> widths) {
     final lastDelay = t.delays.isNotEmpty ? t.delays.last : null;
     final isSelected = _selected.any((x) => x.id == t.id);
     final cellTexts = [
-      '${index + 1}',
-      t.meetingNo,
-      t.taskNo.toString(),
-      t.taskDesc,
-      t.dept,
-      t.owner,
-      t.requiredDate,
-      t.actualDate,
-      lastDelay?.delayDate ?? '',
-      lastDelay?.delayReason ?? '',
-      t.hasAttachment ? '有' : '无',
-      t.remark,
+      '${index + 1}', t.meetingNo, t.taskNo.toString(), t.taskDesc, t.dept,
+      t.owner, t.requiredDate, t.actualDate, lastDelay?.delayDate ?? '',
+      lastDelay?.delayReason ?? '', t.hasAttachment ? '有' : '无', t.remark,
     ];
     return Container(
       color: isSelected ? Colors.blue.withOpacity(0.1) : null,
       child: Row(
         children: [
           SizedBox(
-            width: 48,
+            width: taskSelectionWidth,
             child: Checkbox(
               value: isSelected,
               onChanged: (v) {
@@ -408,18 +349,64 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           for (int i = 0; i < cellTexts.length; i++)
-            GestureDetector(
-              onTap: () => _viewTask(t),
-              onDoubleTap: () => _editTask(t),
-              onLongPress: () => _viewTask(t),
-              child: Container(
-                width: _colWidths[i],
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                child: Text(cellTexts[i]),
+            SizedBox(
+              width: widths[i],
+              child: GestureDetector(
+                onTap: () => _viewTask(t),
+                onDoubleTap: () => _editTask(t),
+                onLongPress: () => _viewTask(t),
+                child: Tooltip(
+                  message: cellTexts[i],
+                  waitDuration: const Duration(milliseconds: 500),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    child: Text(cellTexts[i], maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
               ),
             ),
         ],
       ),
+    );
+  }
+
+
+  Widget _buildActionBar() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 1050;
+        Widget action(IconData icon, String label, VoidCallback callback, {bool primary = false}) {
+          if (compact) {
+            return IconButton(icon: Icon(icon), tooltip: label, onPressed: callback);
+          }
+          return primary
+              ? FilledButton.icon(onPressed: callback, icon: Icon(icon), label: Text(label))
+              : OutlinedButton.icon(onPressed: callback, icon: Icon(icon), label: Text(label));
+        }
+
+        return Row(
+          children: [
+            action(Icons.add, '添加条目', _addTask, primary: true),
+            const SizedBox(width: 6),
+            action(Icons.delete_outline, '删除条目', _deleteSelected),
+            const SizedBox(width: 6),
+            action(Icons.more_time, '添加延期', _addDelay),
+            const SizedBox(width: 6),
+            action(Icons.history_toggle_off, '查看/删除延期', _delDelay),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                _filterSummary.isEmpty ? '' : '筛选: $_filterSummary',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.grey),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text('共 ${_tasks.length} 条', style: const TextStyle(color: Colors.grey)),
+          ],
+        );
+      },
     );
   }
 
@@ -432,7 +419,7 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(icon: const Icon(Icons.refresh), onPressed: _reload, tooltip: '刷新'),
           IconButton(icon: const Icon(Icons.filter_alt), onPressed: _openFilter, tooltip: '统计筛选'),
           IconButton(icon: const Icon(Icons.history), onPressed: _saveSnapshot, tooltip: '保存历史快照'),
-          _HoverMenuButton(
+          _ClickMenuButton(
             icon: Icons.file_download,
             tooltip: '导出',
             items: [
@@ -441,7 +428,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _MenuEntry(icon: Icons.storage, label: '导出数据库', onTap: _exportDb),
             ],
           ),
-          _HoverMenuButton(
+          _ClickMenuButton(
             icon: Icons.upload_file,
             tooltip: '导入',
             items: [
@@ -457,49 +444,34 @@ class _HomeScreenState extends State<HomeScreen> {
           Container(
             color: Colors.black.withOpacity(0.04),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            child: Row(
-              children: [
-                FilledButton.icon(onPressed: _addTask, icon: const Icon(Icons.add), label: const Text('添加条目')),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(onPressed: _deleteSelected, icon: const Icon(Icons.delete_outline), label: const Text('删除条目')),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(onPressed: _addDelay, icon: const Icon(Icons.more_time), label: const Text('添加延期')),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(onPressed: _delDelay, icon: const Icon(Icons.history_toggle_off), label: const Text('查看/删除延期')),
-                const SizedBox(width: 16),
-                if (_filterSummary.isNotEmpty)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 8),
-                      child: Text('筛选: $_filterSummary', style: const TextStyle(color: Colors.grey)),
-                    ),
-                  )
-                else
-                  const Spacer(),
-                Text('共 ${_tasks.length} 条', style: const TextStyle(color: Colors.grey)),
-              ],
-            ),
+            child: _buildActionBar(),
           ),
           if (!_backendOk)
             const Padding(
               padding: EdgeInsets.all(8),
-              child: Text('后端未连接，请在应用目录运行后端程序或检查端口。', style: TextStyle(color: Colors.red)),
+              child: Text('本地服务未连接，请确认 hyrwbz_backend.exe 位于应用目录。', style: TextStyle(color: Colors.red)),
             ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _tasks.isEmpty
                     ? const Center(child: Text('暂无数据，点击「添加条目」开始'))
-                    : SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: SingleChildScrollView(
-                          child: Column(
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          final widths = computeTaskColumnWidths(constraints.maxWidth);
+                          return Column(
                             children: [
-                              _buildHeaderRow(),
-                              ..._tasks.asMap().entries.map((e) => _buildDataRow(e.key, e.value)),
+                              _buildHeaderRow(widths),
+                              Expanded(
+                                child: ListView.builder(
+                                  itemCount: _tasks.length,
+                                  itemBuilder: (context, index) =>
+                                      _buildDataRow(index, _tasks[index], widths),
+                                ),
+                              ),
                             ],
-                          ),
-                        ),
+                          );
+                        },
                       ),
           ),
         ],
@@ -810,73 +782,28 @@ class _MenuEntry {
   const _MenuEntry({required this.icon, required this.label, required this.onTap});
 }
 
-/// 悬停自动展开的下拉按钮：鼠标移入展开菜单，移出后短暂延迟收起；
-/// 点击按钮也可展开/收起。用于 AppBar 上聚合多个导入/导出入口。
-class _HoverMenuButton extends StatefulWidget {
+/// 仅点击打开的下拉菜单，鼠标悬停不会改变菜单状态。
+class _ClickMenuButton extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final List<_MenuEntry> items;
-  const _HoverMenuButton({required this.icon, required this.tooltip, required this.items});
-
-  @override
-  State<_HoverMenuButton> createState() => _HoverMenuButtonState();
-}
-
-class _HoverMenuButtonState extends State<_HoverMenuButton> {
-  final MenuController _controller = MenuController();
-  Timer? _closeTimer;
-
-  @override
-  void dispose() {
-    _closeTimer?.cancel();
-    super.dispose();
-  }
-
-  void _open() {
-    _closeTimer?.cancel();
-    if (!_controller.isOpen) _controller.open();
-  }
-
-  void _scheduleClose() {
-    _closeTimer?.cancel();
-    _closeTimer = Timer(const Duration(milliseconds: 300), () {
-      if (mounted) _controller.close();
-    });
-  }
+  const _ClickMenuButton({required this.icon, required this.tooltip, required this.items});
 
   @override
   Widget build(BuildContext context) {
     return MenuAnchor(
-      controller: _controller,
       menuChildren: [
-        for (final item in widget.items)
-          MouseRegion(
-            // 鼠标进入菜单项时取消收起计时，避免从按钮移动到菜单途中被关闭
-            onEnter: (_) => _closeTimer?.cancel(),
-            child: MenuItemButton(
-              leadingIcon: Icon(item.icon, size: 18),
-              onPressed: () {
-                _controller.close();
-                item.onTap();
-              },
-              child: Text(item.label),
-            ),
+        for (final item in items)
+          MenuItemButton(
+            leadingIcon: Icon(item.icon, size: 18),
+            onPressed: item.onTap,
+            child: Text(item.label),
           ),
       ],
-      child: MouseRegion(
-        onEnter: (_) => _open(),
-        onExit: (_) => _scheduleClose(),
-        child: IconButton(
-          icon: Icon(widget.icon),
-          tooltip: widget.tooltip,
-          onPressed: () {
-            if (_controller.isOpen) {
-              _controller.close();
-            } else {
-              _open();
-            }
-          },
-        ),
+      builder: (context, controller, child) => IconButton(
+        icon: Icon(icon),
+        tooltip: tooltip,
+        onPressed: () => controller.isOpen ? controller.close() : controller.open(),
       ),
     );
   }

@@ -1,4 +1,4 @@
-import 'dart:io' show File, Platform, Process;
+import 'dart:io' show File;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../api.dart';
@@ -107,16 +107,27 @@ class _EditScreenState extends State<EditScreen> {
     }
   }
 
-  void _openUrl(String url) {
+  Future<void> _downloadAttachment(Attachment attachment) async {
     try {
-      if (Platform.isWindows) {
-        Process.run('cmd', ['/c', 'start', '', url]);
-      } else if (Platform.isMacOS) {
-        Process.run('open', [url]);
-      } else {
-        Process.run('xdg-open', [url]);
+      final result = await Api.downloadAttachment(attachment.id);
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: '保存附件',
+        fileName: result.filename,
+      );
+      if (path == null || path.isEmpty) return;
+      await File(path).writeAsBytes(result.bytes, flush: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('附件已保存: $path')),
+        );
       }
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('下载附件失败: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _save() async {
@@ -263,7 +274,7 @@ class _EditScreenState extends State<EditScreen> {
                           children: [
                             IconButton(
                               icon: const Icon(Icons.download),
-                              onPressed: () => _openUrl(Api.downloadAttachmentUrl(a.id)),
+                              onPressed: () => _downloadAttachment(a),
                               tooltip: '下载',
                             ),
                             IconButton(

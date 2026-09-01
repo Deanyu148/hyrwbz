@@ -29,12 +29,12 @@
 为避免后端弹出控制台黑窗、并让前后端真正连通，采用 Flutter Windows 桌面 GUI 主进程 + Rust 后端子进程模式：
 
 1. 桌面图标双击 → 启动 Flutter Windows GUI (hyrwbz_frontend.exe)
-2. Flutter main() 启动时 Process.start 拉起同目录的 hyrwbz_backend.exe，参数 --port <N>
-3. Rust 后端用 windows_subsystem = windows 编译（非 console），无任何窗口可见
-4. 后端监听 127.0.0.1:<port>（端口从 --port 读取，前端随机选取空闲端口）
-5. 前端轮询 /api/health 直到就绪（最多 10s），失败弹错误对话框
-6. 前端通过 http://127.0.0.1:<port>/api/... 调用所有 API
-7. 前端退出（窗口关闭）时 Process.kill 后端子进程
+2. Flutter main() 启动时生成唯一 LocalSocket 地址并拉起同目录的 hyrwbz_backend.exe
+3. Windows 使用命名管道 `\\.\pipe\hyrwbz_<pid>_<nonce>`，不监听 TCP 端口
+4. 前后端通过带长度帧头的 JSON RPC 与原始二进制载荷通信
+5. 前端在 10 秒内等待本地服务就绪，失败时显示错误提示
+6. 导入、附件等二进制数据直接通过 LocalSocket 传输，不使用 Base64
+7. 前端退出后主动结束后端，后端同时通过 parent-pid 看门狗兜底退出
 
 ### 数据存储
 
@@ -91,25 +91,20 @@
 
 最多保留 5 份，超出滚动删除最早一份。
 
-## API 一览
+## LocalSocket RPC 一览
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | /api/health | 健康检查 |
-| GET | /api/tasks | 列表（支持筛选） |
-| POST | /api/tasks | 新增（自动分配 task_no） |
-| PUT | /api/tasks/:id | 编辑 |
-| DELETE | /api/tasks/:id | 删除（级联延期） |
-| GET | /api/tasks/:id/delays | 延期列表 |
-| POST | /api/tasks/:id/delays | 新增延期（滚动 20 条） |
-| DELETE | /api/delays/:id | 删除延期 |
-| GET | /api/locked-meeting | 获取锁定会议号 |
-| PUT | /api/locked-meeting | 设置/解锁 |
-| POST | /api/export/excel | 按筛选导出 Excel（6 Sheet） |
-| POST | /api/snapshot | 保存快照（保留 5 份） |
-| GET | /api/snapshots | 列出快照 |
-| GET | /api/db/export | 导出 SQLite |
-| POST | /api/db/import | 导入 SQLite |
+前后端使用持久 LocalSocket 连接。每个帧包含 20 字节大端序帧头、JSON 元数据以及可选原始二进制载荷。
+
+| RPC 方法 | 说明 |
+| --- | --- |
+| system.health | 健康检查与协议版本 |
+| task.list/create/update/delete | 任务查询及增删改 |
+| delay.list/create/delete | 延期记录管理 |
+| meeting_lock.get/set | 锁定会议号管理 |
+| snapshot.create/list | 历史快照管理 |
+| export.excel/csv/database | 按筛选导出数据 |
+| import.excel/csv/database | 通过二进制载荷导入数据 |
+| attachment.list/upload/delete/download | 附件管理及原始字节传输 |
 
 ## Excel 导出规则
 
@@ -121,7 +116,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Rust + Axum + sqlx + SQLite (windows_subsystem=windows) |
+| 后端 | Rust + Tokio LocalSocket RPC + sqlx + SQLite (windows_subsystem=windows) |
 | 前端 | Flutter Windows 桌面 (Process.start 拉起后端) |
 | 数据库 | SQLite (不加密) |
 | 导出 | rust_xlsxwriter |
@@ -136,17 +131,21 @@
 │   ├── Cargo.toml
 │   ├── migrations/0001_init.sql
 │   └── src/
-│       ├── main.rs            # windows_subsystem=windows + --port 参数
+│       ├── main.rs            # windows_subsystem=windows + LocalSocket 启动参数
 │       ├── db.rs
 │       ├── models.rs
-│       ├── handlers.rs
+│       ├── rpc.rs             # LocalSocket 帧协议与 RPC 分发
+│       ├── service.rs         # 纯业务服务层
 │       ├── excel.rs
 │       └── import_export.rs
 ├── frontend/                  # Flutter Windows 桌面
 │   ├── pubspec.yaml
 │   └── lib/
 │       ├── main.dart          # 启动时拉起后端子进程
-│       ├── api.dart
+│       ├── api.dart            # RPC 业务 API
+│       ├── local_rpc.dart      # LocalSocket 客户端与帧编解码
+│       ├── backend_manager.dart
+│       ├── window_state.dart
 │       ├── models.dart
 │       └── screens/
 ├── installer/hyrwbz.iss

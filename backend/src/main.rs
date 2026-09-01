@@ -1,79 +1,59 @@
-// 在 Windows release 模式下使用 GUI 子系统，无控制台窗口
-// debug 模式仍用 console 便于看日志；非 Windows 平台此属性被忽略
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+// Windows release 模式使用 GUI 子系统，不显示控制台窗口。
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 mod db;
 mod excel;
-mod handlers;
 mod import_export;
 mod models;
+mod rpc;
+mod service;
 
-use axum::{
-    extract::{Multipart, State},
-    http::StatusCode,
-    response::IntoResponse,
-    routing::{delete, get, post, put},
-    Json, Router,
-};
-use models::*;
-use serde_json::json;
-use std::net::SocketAddr;
-use tower_http::cors::{Any, CorsLayer};
-
-/// 解析 --port（默认 7790）与 --parent-pid（父进程 pid，用于看门狗）参数
-fn parse_args() -> (u16, u32) {
+/// 解析 --socket-path 与 --parent-pid。
+fn parse_args() -> anyhow::Result<(String, u32)> {
     let mut args = std::env::args().skip(1);
-    let mut port = 7790u16;
+    let mut socket_path = None;
     let mut parent_pid = 0u32;
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--port" => {
-                if let Some(v) = args.next() {
-                    if let Ok(p) = v.parse::<u16>() {
-                        port = p;
-                    }
-                }
-            }
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--socket-path" => socket_path = args.next(),
             "--parent-pid" => {
-                if let Some(v) = args.next() {
-                    if let Ok(p) = v.parse::<u32>() {
-                        parent_pid = p;
-                    }
-                }
+                parent_pid = args
+                    .next()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(0);
             }
             _ => {}
         }
     }
-    (port, parent_pid)
+    let socket_path = socket_path.ok_or_else(|| anyhow::anyhow!("missing --socket-path"))?;
+    Ok((socket_path, parent_pid))
 }
 
-/// 父进程存活检测：Windows 用 OpenProcess 查询；类 Unix 检查 /proc/<pid>。
 #[cfg(windows)]
 fn parent_alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess};
-    // PROCESS_QUERY_LIMITED_INFORMATION
     let handle = unsafe { OpenProcess(0x1000, 0, pid) };
     if handle.is_null() {
         return false;
     }
-    let mut code: u32 = 0;
+    let mut code = 0u32;
     let ok = unsafe { GetExitCodeProcess(handle, &mut code) };
     unsafe { CloseHandle(handle) };
-    ok != 0 && code == 259 // STILL_ACTIVE
+    ok != 0 && code == 259
 }
 
 #[cfg(not(windows))]
 fn parent_alive(pid: u32) -> bool {
-    std::path::Path::new(&format!("/proc/{}", pid)).exists()
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
-/// 看门狗：父进程（前端）退出后自动结束本进程。
-/// 前端以 detached 模式启动后端，操作系统不会在前端退出时连带清理，
-/// 前端自身的 kill 也可能因崩溃等原因未执行，靠此兜底防止后端残留。
 async fn parent_watchdog(parent_pid: u32) {
     loop {
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         if !parent_alive(parent_pid) {
             std::process::exit(0);
         }
@@ -82,184 +62,15 @@ async fn parent_watchdog(parent_pid: u32) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 仅 debug 模式输出 tracing 日志；release 在 GUI 子系统下也无 stdout
     #[cfg(debug_assertions)]
     tracing_subscriber::fmt().with_env_filter("info").init();
 
-    let (port, parent_pid) = parse_args();
+    let (socket_path, parent_pid) = parse_args()?;
     if parent_pid > 0 {
         tokio::spawn(parent_watchdog(parent_pid));
     }
-    let db_path = db::default_db_path();
-    let pool = db::init(&db_path).await?;
-
-    let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
-    let app = Router::new()
-        .route("/api/health", get(|| async { "ok" }))
-        .route("/api/tasks", get(handlers::list_tasks).post(handlers::create_task))
-        .route("/api/tasks/:id", put(handlers::update_task).delete(handlers::delete_task))
-        .route("/api/tasks/:id/delays", get(handlers::list_delays).post(handlers::create_delay))
-        .route("/api/delays/:id", delete(handlers::delete_delay))
-        .route("/api/locked-meeting", get(handlers::get_locked).put(handlers::set_locked))
-        .route("/api/export/excel", post(handle_export_excel))
-        .route("/api/import/excel", post(handle_import_excel))
-        .route("/api/export/csv", post(handle_export_csv))
-        .route("/api/import/csv", post(handle_import_csv))
-        .route("/api/snapshot", post(handle_snapshot))
-        .route("/api/snapshots", get(handle_list_snapshots))
-        .route("/api/db/export", get(handle_db_export))
-        .route("/api/db/import", post(handle_db_import))
-        .route("/api/tasks/:id/attachments", get(handlers::list_attachments).post(handlers::upload_attachment))
-        .route("/api/attachments/:id", delete(handlers::delete_attachment))
-        .route("/api/attachments/:id/download", get(handlers::download_attachment))
-        .layer(cors)
-        .with_state(pool);
-
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let pool = db::init(&db::default_db_path()).await?;
     #[cfg(debug_assertions)]
-    tracing::info!("listening on http://{}", addr);
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
-    Ok(())
-}
-
-async fn handle_export_excel(State(db): State<db::Db>, Json(body): Json<ExportReq>) -> impl IntoResponse {
-    match excel::export(&db, body.filter, body.out_dir).await {
-        Ok(r) => (StatusCode::OK, Json(json!({"path": r.path, "sheets": r.sheets}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct ExportReq {
-    filter: FilterReq,
-    out_dir: Option<String>,
-}
-
-async fn handle_snapshot(State(db): State<db::Db>) -> impl IntoResponse {
-    match import_export::create_snapshot(&db).await {
-        Ok(id) => (StatusCode::OK, Json(json!({"snapshot_id": id}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-async fn handle_list_snapshots(State(db): State<db::Db>) -> impl IntoResponse {
-    match import_export::list_snapshots(&db).await {
-        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-async fn handle_db_export(State(_db): State<db::Db>) -> impl IntoResponse {
-    match import_export::export_db_file().await {
-        Ok(p) => (StatusCode::OK, Json(json!({"path": p}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-async fn handle_db_import(State(db): State<db::Db>, mut mp: Multipart) -> impl IntoResponse {
-    while let Ok(Some(field)) = mp.next_field().await {
-        let name = field.name().unwrap_or("").to_string();
-        if name == "file" || name == "db" {
-            let data = match field.bytes().await {
-                Ok(b) => b,
-                Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
-            };
-            let tmp = std::env::temp_dir().join(format!("hyrwbz_import_{}.db", uuid::Uuid::new_v4()));
-            if let Err(e) = std::fs::write(&tmp, &data) {
-                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-            }
-            match import_export::import_db_file(&db, tmp.to_string_lossy().as_ref()).await {
-                Ok(_) => {
-                    std::fs::remove_file(&tmp).ok();
-                    return (StatusCode::OK, Json(json!({"ok": true}))).into_response();
-                }
-                Err(e) => {
-                    std::fs::remove_file(&tmp).ok();
-                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-                }
-            }
-        }
-    }
-    (StatusCode::BAD_REQUEST, "no file field".to_string()).into_response()
-}
-
-async fn handle_import_excel(State(db): State<db::Db>, mut mp: Multipart) -> impl IntoResponse {
-    while let Ok(Some(field)) = mp.next_field().await {
-        if field.name() == Some("file") {
-            // field.bytes() 会消耗 field，文件名须在此之前取出
-            let orig_name = field.file_name().unwrap_or("").to_string();
-            let data = match field.bytes().await {
-                Ok(b) => b,
-                Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
-            };
-            // calamine 的 open_workbook_auto 按扩展名选择读取器。
-            // 临时文件不能固定命名为 .xlsx，否则二进制 .xls 会被 Xlsx（zip）
-            // 读取器打开而报 "File not found 'xl/_rels/workbook.xml.rels'" 等错。
-            // 这里按文件头魔数判断真实格式：OLE2(.xls) / zip(.xlsx)，扩展名兜底。
-            let head = &data[..data.len().min(8)];
-            let ext = if head.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) {
-                "xls"
-            } else if head.starts_with(&[0x50, 0x4B]) {
-                "xlsx"
-            } else {
-                match std::path::Path::new(&orig_name)
-                    .extension()
-                    .map(|e| e.to_string_lossy().to_lowercase())
-                    .as_deref()
-                {
-                    Some("xls") => "xls",
-                    _ => "xlsx",
-                }
-            };
-            let tmp = std::env::temp_dir().join(format!("hyrwbz_excel_{}.{}", uuid::Uuid::new_v4(), ext));
-            if let Err(e) = std::fs::write(&tmp, &data) {
-                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-            }
-            match import_export::import_excel(&db, tmp.to_string_lossy().as_ref()).await {
-                Ok(r) => {
-                    std::fs::remove_file(&tmp).ok();
-                    return (StatusCode::OK, Json(json!({"imported": r.imported, "errors": r.errors}))).into_response();
-                }
-                Err(e) => {
-                    std::fs::remove_file(&tmp).ok();
-                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-                }
-            }
-        }
-    }
-    (StatusCode::BAD_REQUEST, "no file field".to_string()).into_response()
-}
-
-async fn handle_export_csv(State(db): State<db::Db>, Json(body): Json<ExportReq>) -> impl IntoResponse {
-    match import_export::export_csv(&db, body.filter, body.out_dir).await {
-        Ok(p) => (StatusCode::OK, Json(json!({"path": p}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-async fn handle_import_csv(State(db): State<db::Db>, mut mp: Multipart) -> impl IntoResponse {
-    while let Ok(Some(field)) = mp.next_field().await {
-        if field.name() == Some("file") {
-            let data = match field.bytes().await {
-                Ok(b) => b,
-                Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
-            };
-            let tmp = std::env::temp_dir().join(format!("hyrwbz_csv_{}.csv", uuid::Uuid::new_v4()));
-            if let Err(e) = std::fs::write(&tmp, &data) {
-                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-            }
-            match import_export::import_csv(&db, tmp.to_string_lossy().as_ref()).await {
-                Ok(r) => {
-                    std::fs::remove_file(&tmp).ok();
-                    return (StatusCode::OK, Json(json!({"imported": r.imported, "errors": r.errors}))).into_response();
-                }
-                Err(e) => {
-                    std::fs::remove_file(&tmp).ok();
-                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-                }
-            }
-        }
-    }
-    (StatusCode::BAD_REQUEST, "no file field".to_string()).into_response()
+    tracing::info!("listening on local socket {}", socket_path);
+    rpc::serve(&socket_path, pool).await
 }

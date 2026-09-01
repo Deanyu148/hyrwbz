@@ -7,14 +7,10 @@ use sqlx::Row;
 use std::fs;
 use std::path::PathBuf;
 
-pub async fn export(
-    db: &Db,
-    filter: FilterReq,
-    out_dir: Option<String>,
-) -> Result<ExportResult> {
-    let tasks = crate::handlers::list_tasks_inner(db, &filter)
+pub async fn export(db: &Db, filter: FilterReq, out_dir: Option<String>) -> Result<ExportResult> {
+    let tasks = crate::service::list_tasks(db, &filter)
         .await
-        .map_err(|e| anyhow::anyhow!("list tasks: {}", e.1))?;
+        .map_err(|e| anyhow::anyhow!("list tasks: {}", e.message))?;
 
     let mut wb = Workbook::new();
     let title_fmt = Format::new().set_bold().set_background_color("DDDDDD");
@@ -26,14 +22,20 @@ pub async fn export(
     write_sheet(sheet1, &tasks, &title_fmt, &center)?;
 
     // 历史 snapshots
-    let snaps = sqlx::query("SELECT snapshot_id, saved_at, payload FROM snapshots ORDER BY snapshot_id DESC LIMIT 5")
-        .fetch_all(db)
-        .await?;
-    let sorted: Vec<(String, String)> = snaps.iter().rev().map(|r| {
-        let saved_at: String = r.try_get("saved_at").unwrap_or_default();
-        let payload: String = r.try_get("payload").unwrap_or_default();
-        (saved_at, payload)
-    }).collect();
+    let snaps = sqlx::query(
+        "SELECT snapshot_id, saved_at, payload FROM snapshots ORDER BY snapshot_id DESC LIMIT 5",
+    )
+    .fetch_all(db)
+    .await?;
+    let sorted: Vec<(String, String)> = snaps
+        .iter()
+        .rev()
+        .map(|r| {
+            let saved_at: String = r.try_get("saved_at").unwrap_or_default();
+            let payload: String = r.try_get("payload").unwrap_or_default();
+            (saved_at, payload)
+        })
+        .collect();
 
     // 仅保留 5 份，倒序：Sheet2 = 第一份历史（最早），即倒序后第一个
     let mut sheets_names: Vec<String> = vec!["当前数据".to_string()];
@@ -47,7 +49,9 @@ pub async fn export(
     }
 
     let now = Local::now().format("%Y%m%d_%H%M%S").to_string();
-    let dir = out_dir.map(PathBuf::from).unwrap_or_else(default_export_dir);
+    let dir = out_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(default_export_dir);
     fs::create_dir_all(&dir)?;
     let fname = format!("hyrwbz_export_{}.xlsx", now);
     let path = dir.join(fname);
@@ -78,8 +82,14 @@ fn write_sheet(
     let max_delays = tasks.iter().map(|t| t.delays.len()).max().unwrap_or(0);
     // 基础表头 ("任务说明" renamed to "任务内容")
     let base_headers = [
-        "序号", "会议纪要号", "任务序号", "任务内容", "责任部门", "责任人",
-        "计划完成时间", "实际完成时间",
+        "序号",
+        "会议纪要号",
+        "任务序号",
+        "任务内容",
+        "责任部门",
+        "责任人",
+        "计划完成时间",
+        "实际完成时间",
     ];
     // 写基础表头
     for (c, h) in base_headers.iter().enumerate() {
@@ -139,11 +149,9 @@ fn write_sheet(
     Ok(())
 }
 
-
 fn default_export_dir() -> PathBuf {
     // 导出目录放在 exe 同目录下的 exports/（安装目录）
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
     let dir = exe.parent().unwrap_or_else(|| std::path::Path::new("."));
     dir.join("exports")
 }
-

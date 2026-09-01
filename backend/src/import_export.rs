@@ -1,7 +1,7 @@
 use crate::db::{self, Db};
 use anyhow::Result;
+use calamine::{open_workbook_auto, Data, Reader};
 use chrono::Local;
-use calamine::{Data, Reader, open_workbook_auto};
 use sqlx::Row;
 use std::fs;
 use std::io::{Read, Write};
@@ -21,14 +21,21 @@ pub async fn import_db_file(db: &Db, src_path: &str) -> Result<()> {
     // Use ATTACH/INSERT to safely import while server is running
     let escaped_path = src_path.replace('\'', "''");
     sqlx::query(&format!("ATTACH DATABASE '{}' AS import_src", escaped_path))
-        .execute(db).await?;
+        .execute(db)
+        .await?;
 
     for table in &["tasks", "delays", "meta", "snapshots", "attachments"] {
         // Check if source table exists
-        let count: i64 = sqlx::query_scalar(
-            &format!("SELECT count(*) FROM import_src.sqlite_master WHERE type='table' AND name='{}'", table)
-        ).fetch_one(db).await.unwrap_or(0);
-        if count == 0 { continue; }
+        let count: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM import_src.sqlite_master WHERE type='table' AND name='{}'",
+            table
+        ))
+        .fetch_one(db)
+        .await
+        .unwrap_or(0);
+        if count == 0 {
+            continue;
+        }
 
         let mut tx = db.begin().await?;
         let del = format!("DELETE FROM {}", table);
@@ -51,7 +58,9 @@ pub async fn import_db_file(db: &Db, src_path: &str) -> Result<()> {
 }
 
 pub async fn create_snapshot(db: &Db) -> Result<i64> {
-    let tasks = crate::handlers::list_tasks_inner(db, &crate::models::FilterReq::default()).await.map_err(|e| anyhow::anyhow!("{}", e.1))?;
+    let tasks = crate::service::list_tasks(db, &crate::models::FilterReq::default())
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.message))?;
     let payload = serde_json::to_string(&tasks)?;
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let res = sqlx::query("INSERT INTO snapshots (saved_at, payload) VALUES (?1, ?2)")
@@ -72,13 +81,18 @@ pub async fn create_snapshot(db: &Db) -> Result<i64> {
 }
 
 pub async fn list_snapshots(db: &Db) -> Result<Vec<crate::models::SnapshotInfo>> {
-    let rows = sqlx::query("SELECT snapshot_id, saved_at FROM snapshots ORDER BY snapshot_id DESC LIMIT 5")
-        .fetch_all(db)
-        .await?;
-    Ok(rows.iter().map(|r| crate::models::SnapshotInfo {
-        snapshot_id: r.try_get("snapshot_id").unwrap_or_default(),
-        saved_at: r.try_get("saved_at").unwrap_or_default(),
-    }).collect())
+    let rows = sqlx::query(
+        "SELECT snapshot_id, saved_at FROM snapshots ORDER BY snapshot_id DESC LIMIT 5",
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|r| crate::models::SnapshotInfo {
+            snapshot_id: r.try_get("snapshot_id").unwrap_or_default(),
+            saved_at: r.try_get("saved_at").unwrap_or_default(),
+        })
+        .collect())
 }
 
 fn default_export_dir() -> PathBuf {
@@ -102,24 +116,25 @@ pub async fn import_excel(db: &Db, file_path: &str) -> Result<ImportResult> {
         // 部分"精简生成器"导出的文件缺 xl/_rels/workbook.xml.rels，
         // 自动补上该文件后重试
         Err(e) if e.to_string().contains("workbook.xml.rels") => {
-            let repaired = repair_xlsx_missing_rels(file_path).map_err(|re| {
-                anyhow::anyhow!("打开 Excel 失败: {}（自动修复失败: {}）", e, re)
-            })?;
+            let repaired = repair_xlsx_missing_rels(file_path)
+                .map_err(|re| anyhow::anyhow!("打开 Excel 失败: {}（自动修复失败: {}）", e, re))?;
             let res = open_workbook_auto(&repaired);
             fs::remove_file(&repaired).ok();
-            res.map_err(|e2| {
-                anyhow::anyhow!("打开 Excel 失败（已尝试自动修复）: {}", e2)
-            })?
+            res.map_err(|e2| anyhow::anyhow!("打开 Excel 失败（已尝试自动修复）: {}", e2))?
         }
         Err(e) => {
             return Err(anyhow::anyhow!(
-                "打开 Excel 失败（请确认文件为有效的 xlsx/xls 格式）: {}", e
+                "打开 Excel 失败（请确认文件为有效的 xlsx/xls 格式）: {}",
+                e
             ))
         }
     };
     let sheet_names = workbook.sheet_names().to_vec();
-    let sheet_name = sheet_names.first().ok_or_else(|| anyhow::anyhow!("no sheets"))?;
-    let range = workbook.worksheet_range(sheet_name)
+    let sheet_name = sheet_names
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("no sheets"))?;
+    let range = workbook
+        .worksheet_range(sheet_name)
         .map_err(|e| anyhow::anyhow!("read sheet: {}", e))?;
 
     let rows: Vec<Vec<String>> = range
@@ -154,13 +169,13 @@ fn repair_xlsx_missing_rels(src: &str) -> Result<PathBuf> {
     let mut idx = 0usize;
     let mut rest = workbook_xml.as_str();
     while let Some(p) = rest.find("<sheet ") {
-        let tag_end = p + rest[p..].find('>')
+        let tag_end = p + rest[p..]
+            .find('>')
             .ok_or_else(|| anyhow::anyhow!("workbook.xml 中 <sheet> 标签未闭合"))?;
         let tag = &rest[p..tag_end];
         idx += 1;
         let rid = extract_xml_attr(tag, "r:id").unwrap_or_else(|| format!("rId{}", idx));
-        let sheet_id =
-            extract_xml_attr(tag, "sheetId").unwrap_or_else(|| idx.to_string());
+        let sheet_id = extract_xml_attr(tag, "sheetId").unwrap_or_else(|| idx.to_string());
         rels.push_str(&format!(
             "<Relationship Id=\"{}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet{}.xml\"/>",
             rid, sheet_id
@@ -171,8 +186,7 @@ fn repair_xlsx_missing_rels(src: &str) -> Result<PathBuf> {
     rels.push_str("</Relationships>");
 
     // 重写 zip：复制全部条目并插入缺失的 rels
-    let dst = std::env::temp_dir()
-        .join(format!("hyrwbz_repair_{}.xlsx", uuid::Uuid::new_v4()));
+    let dst = std::env::temp_dir().join(format!("hyrwbz_repair_{}.xlsx", uuid::Uuid::new_v4()));
     let mut zw = zip::ZipWriter::new(fs::File::create(&dst)?);
     for i in 0..archive.len() {
         let mut f = archive.by_index(i)?;
@@ -185,7 +199,10 @@ fn repair_xlsx_missing_rels(src: &str) -> Result<PathBuf> {
         zw.start_file(name, zip::write::SimpleFileOptions::default())?;
         zw.write_all(&buf)?;
     }
-    zw.start_file("xl/_rels/workbook.xml.rels", zip::write::SimpleFileOptions::default())?;
+    zw.start_file(
+        "xl/_rels/workbook.xml.rels",
+        zip::write::SimpleFileOptions::default(),
+    )?;
     zw.write_all(rels.as_bytes())?;
     zw.finish()?;
     Ok(dst)
@@ -225,7 +242,10 @@ pub async fn import_csv(db: &Db, file_path: &str) -> Result<ImportResult> {
 /// 按模板列（序号/会议纪要号/任务序号/任务内容/...）导入数据行，Excel 与 CSV 共用。
 async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
     if rows.is_empty() {
-        return Ok(ImportResult { imported: 0, errors: vec![] });
+        return Ok(ImportResult {
+            imported: 0,
+            errors: vec![],
+        });
     }
 
     let headers: Vec<String> = rows[0].iter().map(|c| c.trim().to_string()).collect();
@@ -253,9 +273,13 @@ async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
         };
 
         let meeting_no = get_str(col_meeting);
-        if meeting_no.is_empty() { continue; }
+        if meeting_no.is_empty() {
+            continue;
+        }
         let task_no: i64 = get_str(col_task_no).parse().unwrap_or(0);
-        if task_no == 0 { continue; }
+        if task_no == 0 {
+            continue;
+        }
 
         let task_desc = get_str(col_desc);
         let dept = get_str(col_dept);
@@ -267,17 +291,30 @@ async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
 
         let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
-        let existing: Option<i64> = sqlx::query_scalar(
-            "SELECT id FROM tasks WHERE meeting_no = ?1 AND task_no = ?2",
-        ).bind(&meeting_no).bind(task_no).fetch_optional(db).await?;
+        let existing: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM tasks WHERE meeting_no = ?1 AND task_no = ?2")
+                .bind(&meeting_no)
+                .bind(task_no)
+                .fetch_optional(db)
+                .await?;
 
         let task_id = if let Some(id) = existing {
             sqlx::query(
                 "UPDATE tasks SET meeting_no=?1, task_no=?2, task_desc=?3, dept=?4, owner=?5,
                  required_date=?6, actual_date=?7, remark=?8, updated_at=?9 WHERE id=?10",
-            ).bind(&meeting_no).bind(task_no).bind(&task_desc).bind(&dept)
-            .bind(&owner).bind(&required_date).bind(&actual_date).bind(&remark)
-            .bind(&now).bind(id).execute(db).await?;
+            )
+            .bind(&meeting_no)
+            .bind(task_no)
+            .bind(&task_desc)
+            .bind(&dept)
+            .bind(&owner)
+            .bind(&required_date)
+            .bind(&actual_date)
+            .bind(&remark)
+            .bind(&now)
+            .bind(id)
+            .execute(db)
+            .await?;
             id
         } else {
             let res = sqlx::query(
@@ -290,9 +327,12 @@ async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
         };
 
         if !delay_date.is_empty() {
-            let existing_delay: Option<i64> = sqlx::query_scalar(
-                "SELECT id FROM delays WHERE task_id = ?1 AND delay_date = ?2",
-            ).bind(task_id).bind(&delay_date).fetch_optional(db).await?;
+            let existing_delay: Option<i64> =
+                sqlx::query_scalar("SELECT id FROM delays WHERE task_id = ?1 AND delay_date = ?2")
+                    .bind(task_id)
+                    .bind(&delay_date)
+                    .fetch_optional(db)
+                    .await?;
             if existing_delay.is_none() {
                 sqlx::query(
                     "INSERT INTO delays (task_id, meeting_no, task_no, delay_date, delay_reason, created_at)
@@ -310,13 +350,19 @@ async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
 
 /// 导出 CSV（UTF-8 带 BOM，Excel 可直接打开不乱码）。
 /// 列结构同 template.csv；一条任务有多条延期记录时取第一条延期日期。
-pub async fn export_csv(db: &Db, filter: crate::models::FilterReq, out_dir: Option<String>) -> Result<String> {
-    let tasks = crate::handlers::list_tasks_inner(db, &filter)
+pub async fn export_csv(
+    db: &Db,
+    filter: crate::models::FilterReq,
+    out_dir: Option<String>,
+) -> Result<String> {
+    let tasks = crate::service::list_tasks(db, &filter)
         .await
-        .map_err(|e| anyhow::anyhow!("list tasks: {}", e.1))?;
+        .map_err(|e| anyhow::anyhow!("list tasks: {}", e.message))?;
 
     let now = Local::now().format("%Y%m%d_%H%M%S").to_string();
-    let dir = out_dir.map(PathBuf::from).unwrap_or_else(default_export_dir);
+    let dir = out_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(default_export_dir);
     fs::create_dir_all(&dir)?;
     let path = dir.join(format!("hyrwbz_export_{}.csv", now));
 
@@ -326,11 +372,23 @@ pub async fn export_csv(db: &Db, filter: crate::models::FilterReq, out_dir: Opti
 
     let mut w = csv::Writer::from_writer(file);
     w.write_record(&[
-        "序号", "会议纪要号", "任务序号", "任务内容", "责任部门", "责任人",
-        "计划完成时间", "延期时间", "实际完成时间", "备注",
+        "序号",
+        "会议纪要号",
+        "任务序号",
+        "任务内容",
+        "责任部门",
+        "责任人",
+        "计划完成时间",
+        "延期时间",
+        "实际完成时间",
+        "备注",
     ])?;
     for (i, t) in tasks.iter().enumerate() {
-        let delay_date = t.delays.first().map(|d| d.delay_date.as_str()).unwrap_or("");
+        let delay_date = t
+            .delays
+            .first()
+            .map(|d| d.delay_date.as_str())
+            .unwrap_or("");
         w.write_record(&[
             (i + 1).to_string(),
             t.meeting_no.clone(),
