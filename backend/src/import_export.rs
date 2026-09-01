@@ -1,5 +1,4 @@
 use crate::db::{self, Db};
-use crate::models::FilterReq;
 use anyhow::Result;
 use chrono::Local;
 use calamine::{Data, Reader, open_workbook_auto};
@@ -311,7 +310,7 @@ async fn import_rows(db: &Db, rows: Vec<Vec<String>>) -> Result<ImportResult> {
 
 /// 导出 CSV（UTF-8 带 BOM，Excel 可直接打开不乱码）。
 /// 列结构同 template.csv；一条任务有多条延期记录时取第一条延期日期。
-pub async fn export_csv(db: &Db, filter: FilterReq, out_dir: Option<String>) -> Result<String> {
+pub async fn export_csv(db: &Db, filter: crate::models::FilterReq, out_dir: Option<String>) -> Result<String> {
     let tasks = crate::handlers::list_tasks_inner(db, &filter)
         .await
         .map_err(|e| anyhow::anyhow!("list tasks: {}", e.1))?;
