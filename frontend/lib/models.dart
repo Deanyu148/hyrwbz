@@ -64,6 +64,7 @@ class Task {
   final String remark;
   final String createdAt;
   final String updatedAt;
+  final bool hasAttachment;
   final List<Delay> delays;
   Task({
     this.id,
@@ -77,6 +78,7 @@ class Task {
     required this.remark,
     this.createdAt = '',
     this.updatedAt = '',
+    this.hasAttachment = false,
     this.delays = const [],
   });
   factory Task.fromJson(Map<String, dynamic> j) => Task(
@@ -91,6 +93,7 @@ class Task {
         remark: j['remark'] as String? ?? '',
         createdAt: j['created_at'] as String? ?? '',
         updatedAt: j['updated_at'] as String? ?? '',
+        hasAttachment: j['has_attachment'] as bool? ?? false,
         delays: (j['delays'] as List? ?? []).map((e) => Delay.fromJson(e as Map<String, dynamic>)).toList(),
       );
   Map<String, dynamic> toJson() => {
@@ -117,6 +120,7 @@ class FilterReq {
   final String? delayDateFrom;
   final String? delayDateTo;
   final int? delayIndex;
+  final bool? hasAttachment;
   const FilterReq({
     this.meetingNo,
     this.taskNo,
@@ -129,6 +133,7 @@ class FilterReq {
     this.delayDateFrom,
     this.delayDateTo,
     this.delayIndex,
+    this.hasAttachment,
   });
   bool get isEmpty =>
       meetingNo == null &&
@@ -141,7 +146,8 @@ class FilterReq {
       actualDateTo == null &&
       delayDateFrom == null &&
       delayDateTo == null &&
-      delayIndex == null;
+      delayIndex == null &&
+      hasAttachment == null;
   Map<String, String> toQuery() {
     final m = <String, String>{};
     if (meetingNo != null && meetingNo!.isNotEmpty) m['meeting_no'] = meetingNo!;
@@ -155,6 +161,7 @@ class FilterReq {
     if (delayDateFrom != null) m['delay_date_from'] = delayDateFrom!;
     if (delayDateTo != null) m['delay_date_to'] = delayDateTo!;
     if (delayIndex != null) m['delay_index'] = delayIndex.toString();
+    if (hasAttachment != null) m['has_attachment'] = hasAttachment.toString();
     return m;
   }
 
@@ -171,6 +178,7 @@ class FilterReq {
     if (delayDateFrom != null) m['delay_date_from'] = delayDateFrom;
     if (delayDateTo != null) m['delay_date_to'] = delayDateTo;
     if (delayIndex != null) m['delay_index'] = delayIndex;
+    if (hasAttachment != null) m['has_attachment'] = hasAttachment;
     return m;
   }
 }

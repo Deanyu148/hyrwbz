@@ -16,6 +16,7 @@ class _FilterScreenState extends State<FilterScreen> {
   late final TextEditingController _dept;
   late final TextEditingController _owner;
   late final TextEditingController _delayIndex;
+  late int _attachmentMode;
   // 保存 DateRangeField 的当前值
   String? _requiredFrom, _requiredTo;
   String? _actualFrom, _actualTo;
@@ -28,7 +29,12 @@ class _FilterScreenState extends State<FilterScreen> {
     _taskNo = TextEditingController(text: widget.initial.taskNo?.toString() ?? '');
     _dept = TextEditingController(text: widget.initial.dept ?? '');
     _owner = TextEditingController(text: widget.initial.owner ?? '');
-    _delayIndex = TextEditingController(text: (widget.initial.delayIndex ?? 0).toString());
+    _delayIndex = TextEditingController(text: widget.initial.delayIndex?.toString() ?? '');
+    _attachmentMode = widget.initial.hasAttachment == null
+        ? 0
+        : widget.initial.hasAttachment!
+            ? 1
+            : 2;
     _requiredFrom = widget.initial.requiredDateFrom;
     _requiredTo = widget.initial.requiredDateTo;
     _actualFrom = widget.initial.actualDateFrom;
@@ -49,10 +55,14 @@ class _FilterScreenState extends State<FilterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final dialogWidth = (MediaQuery.sizeOf(context).width - 48)
+        .clamp(300.0, 700.0)
+        .toDouble();
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
       title: const Text('统计筛选'),
       content: SizedBox(
-        width: 700,
+        width: dialogWidth,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -66,6 +76,24 @@ class _FilterScreenState extends State<FilterScreen> {
                   _textField(_dept, '责任部门(逗号分隔)', width: 220),
                   _textField(_owner, '责任人(逗号分隔)', width: 180),
                   _textField(_delayIndex, '延期次数>=', width: 100, isNum: true),
+                  SizedBox(
+                    width: 150,
+                    child: DropdownButtonFormField<int>(
+                      value: _attachmentMode,
+                      decoration: const InputDecoration(
+                        labelText: '附件状态',
+                        isDense: true,
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 0, child: Text('全部')),
+                        DropdownMenuItem(value: 1, child: Text('有附件')),
+                        DropdownMenuItem(value: 2, child: Text('无附件')),
+                      ],
+                      onChanged: (value) {
+                        setState(() => _attachmentMode = value ?? 0);
+                      },
+                    ),
+                  ),
                 ],
               ),
               const Divider(height: 24),
@@ -106,7 +134,9 @@ class _FilterScreenState extends State<FilterScreen> {
           onPressed: () {
             int? tn;
             if (_taskNo.text.isNotEmpty) tn = int.tryParse(_taskNo.text);
-            int? di = int.tryParse(_delayIndex.text) ?? 0;
+            final di = _delayIndex.text.trim().isEmpty
+                ? null
+                : int.tryParse(_delayIndex.text.trim());
             final f = FilterReq(
               meetingNo: _meeting.text.isEmpty ? null : _meeting.text,
               taskNo: tn,
@@ -119,6 +149,9 @@ class _FilterScreenState extends State<FilterScreen> {
               delayDateFrom: _delayFrom,
               delayDateTo: _delayTo,
               delayIndex: di,
+              hasAttachment: _attachmentMode == 0
+                  ? null
+                  : _attachmentMode == 1,
             );
             Navigator.pop(context, f);
           },

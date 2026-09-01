@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 /// 日期选择对话框：同时提供日期选择框与手动键盘输入框，二者同步。
+/// 使用显式维护月份的日历，避免 CalendarDatePicker 在窄窗口重布局时翻月错乱。
 class DatePickerDialogWidget extends StatefulWidget {
   final String? initial;
   final String title;
@@ -12,21 +13,31 @@ class DatePickerDialogWidget extends StatefulWidget {
 }
 
 class _S extends State<DatePickerDialogWidget> {
-  late TextEditingController _ctrl;
+  static final DateTime _firstDate = DateTime(2000, 1, 1);
+  static final DateTime _lastDate = DateTime(2100, 12, 31);
+  static const _weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+
+  late final TextEditingController _ctrl;
   DateTime? _picked;
+  late DateTime _displayedMonth;
 
   @override
   void initState() {
     super.initState();
     final s = widget.initial ?? '';
-    if (s.isNotEmpty) {
-      try {
-        _picked = DateFormat('yyyy/MM/dd').parseStrict(s);
-      } catch (_) {
-        _picked = null;
-      }
-    }
+    _picked = _parseDate(s);
+    final base = _picked ?? DateTime.now();
+    _displayedMonth = DateTime(base.year, base.month);
     _ctrl = TextEditingController(text: s);
+  }
+
+  DateTime? _parseDate(String value) {
+    if (value.isEmpty) return null;
+    try {
+      return DateFormat('yyyy/MM/dd').parseStrict(value);
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -35,67 +46,174 @@ class _S extends State<DatePickerDialogWidget> {
     super.dispose();
   }
 
-  void _set(DateTime d) {
+  void _set(DateTime date) {
     setState(() {
-      _picked = d;
-      _ctrl.text = DateFormat('yyyy/MM/dd').format(d);
+      _picked = date;
+      _displayedMonth = DateTime(date.year, date.month);
+      _ctrl.text = DateFormat('yyyy/MM/dd').format(date);
     });
+  }
+
+  void _changeMonth(int delta) {
+    final candidate = DateTime(
+      _displayedMonth.year,
+      _displayedMonth.month + delta,
+    );
+    final firstMonth = DateTime(_firstDate.year, _firstDate.month);
+    final lastMonth = DateTime(_lastDate.year, _lastDate.month);
+    if (candidate.isBefore(firstMonth) || candidate.isAfter(lastMonth)) return;
+    setState(() => _displayedMonth = candidate);
+  }
+
+  bool _sameDay(DateTime? a, DateTime b) =>
+      a != null && a.year == b.year && a.month == b.month && a.day == b.day;
+
+  Widget _buildCalendar(BuildContext context) {
+    final theme = Theme.of(context);
+    final firstWeekday = DateTime(
+      _displayedMonth.year,
+      _displayedMonth.month,
+      1,
+    ).weekday;
+    final days = DateUtils.getDaysInMonth(
+      _displayedMonth.year,
+      _displayedMonth.month,
+    );
+    final cells = <Widget>[];
+
+    for (var i = 1; i < firstWeekday; i++) {
+      cells.add(const SizedBox.shrink());
+    }
+    for (var day = 1; day <= days; day++) {
+      final date = DateTime(_displayedMonth.year, _displayedMonth.month, day);
+      final selected = _sameDay(_picked, date);
+      final today = _sameDay(DateTime.now(), date);
+      cells.add(
+        Padding(
+          padding: const EdgeInsets.all(2),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => _set(date),
+            child: Container(
+              alignment: Alignment.center,
+              decoration: selected
+                  ? BoxDecoration(
+                      color: theme.colorScheme.primary,
+                      shape: BoxShape.circle,
+                    )
+                  : today
+                      ? BoxDecoration(
+                          border: Border.all(color: theme.colorScheme.primary),
+                          shape: BoxShape.circle,
+                        )
+                      : null,
+              child: Text(
+                '$day',
+                style: selected
+                    ? TextStyle(color: theme.colorScheme.onPrimary)
+                    : null,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            IconButton(
+              tooltip: '上个月',
+              onPressed: () => _changeMonth(-1),
+              icon: const Icon(Icons.chevron_left),
+            ),
+            Expanded(
+              child: Text(
+                DateFormat('yyyy年MM月').format(_displayedMonth),
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium,
+              ),
+            ),
+            IconButton(
+              tooltip: '下个月',
+              onPressed: () => _changeMonth(1),
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
+        GridView.count(
+          crossAxisCount: 7,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          childAspectRatio: 1.15,
+          children: [
+            for (final weekday in _weekdays)
+              Center(
+                child: Text(
+                  weekday,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ...cells,
+          ],
+        ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final availableWidth = MediaQuery.sizeOf(context).width - 48;
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
       title: Text(widget.title),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
+      content: SizedBox(
+        width: availableWidth.clamp(280.0, 360.0).toDouble(),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(
-                child: TextField(
-                  controller: _ctrl,
-                  decoration: const InputDecoration(
-                    labelText: 'YYYY/MM/DD',
-                    hintText: '2026/08/31',
-                  ),
-                  onChanged: (v) {
-                    if (v.length == 10) {
-                      try {
-                        final d = DateFormat('yyyy/MM/dd').parseStrict(v);
-                        setState(() => _picked = d);
-                      } catch (_) {}
-                    }
-                  },
+              TextField(
+                controller: _ctrl,
+                decoration: const InputDecoration(
+                  labelText: 'YYYY/MM/DD',
+                  hintText: '2026/09/01',
+                  suffixIcon: Icon(Icons.calendar_month),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.calendar_month),
-                onPressed: () async {
-                  final now = DateTime.now();
-                  final d = await showDatePicker(
-                    context: context,
-                    initialDate: _picked ?? now,
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime(2100),
-                  );
-                  if (d != null) _set(d);
+                onChanged: (value) {
+                  final date = _parseDate(value);
+                  if (date == null || date.isBefore(_firstDate) || date.isAfter(_lastDate)) {
+                    return;
+                  }
+                  setState(() {
+                    _picked = date;
+                    _displayedMonth = DateTime(date.year, date.month);
+                  });
                 },
               ),
+              const SizedBox(height: 8),
+              _buildCalendar(context),
             ],
           ),
-          const SizedBox(height: 8),
-          CalendarDatePicker(
-            initialDate: _picked ?? DateTime.now(),
-            firstDate: DateTime(2000),
-            lastDate: DateTime(2100),
-            onDateChanged: _set,
-          ),
-        ],
+        ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, null), child: const Text('取消')),
+        TextButton(
+          onPressed: () => Navigator.pop(context, null),
+          child: const Text('取消'),
+        ),
         FilledButton(
-          onPressed: () => Navigator.pop(context, _ctrl.text.isEmpty ? null : _ctrl.text),
+          onPressed: () {
+            final date = _parseDate(_ctrl.text);
+            Navigator.pop(
+              context,
+              date == null ? null : DateFormat('yyyy/MM/dd').format(date),
+            );
+          },
           child: const Text('确定'),
         ),
       ],
@@ -171,31 +289,57 @@ class _DateRangeFieldState extends State<DateRangeField> {
     });
   }
 
+  Widget _dateInput(TextEditingController controller, bool from) {
+    return SizedBox(
+      width: 150,
+      child: TextField(
+        controller: controller,
+        readOnly: true,
+        decoration: InputDecoration(
+          hintText: from ? '开始' : '结束',
+          suffixIcon: IconButton(
+            icon: const Icon(Icons.date_range),
+            onPressed: () => _pick(from),
+          ),
+        ),
+        onTap: () => _pick(from),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(child: Text(widget.label)),
-        SizedBox(
-          width: 120,
-          child: TextField(
-            controller: _from,
-            decoration: const InputDecoration(hintText: '开始'),
-            onTap: () => _pick(true),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final inputs = <Widget>[
+          _dateInput(_from, true),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 6),
+            child: Text('~'),
           ),
-        ),
-        IconButton(icon: const Icon(Icons.date_range), onPressed: () => _pick(true)),
-        const Text('~'),
-        SizedBox(
-          width: 120,
-          child: TextField(
-            controller: _to,
-            decoration: const InputDecoration(hintText: '结束'),
-            onTap: () => _pick(false),
-          ),
-        ),
-        IconButton(icon: const Icon(Icons.date_range), onPressed: () => _pick(false)),
-      ],
+          _dateInput(_to, false),
+        ];
+        if (constraints.maxWidth < 520) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.label),
+              const SizedBox(height: 4),
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                runSpacing: 6,
+                children: inputs,
+              ),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: Text(widget.label)),
+            ...inputs,
+          ],
+        );
+      },
     );
   }
 }

@@ -13,6 +13,8 @@ pub struct Task {
     pub remark: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub has_attachment: bool,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub delays: Vec<Delay>,
 }
@@ -80,6 +82,7 @@ pub struct FilterReq {
     pub delay_date_from: Option<String>,
     pub delay_date_to: Option<String>,
     pub delay_index: Option<i64>,
+    pub has_attachment: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]

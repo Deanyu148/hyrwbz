@@ -93,8 +93,17 @@ pub async fn list_tasks_inner(db: &Db, f: &FilterReq) -> Result<Vec<Task>, ApiEr
     like_multi!("owner", f.owner.as_ref());
     between!("required_date", f.required_date_from, f.required_date_to);
     between!("actual_date", f.actual_date_from, f.actual_date_to);
+    if let Some(has_attachment) = f.has_attachment {
+        where_parts.push(if has_attachment {
+            "EXISTS (SELECT 1 FROM attachments a WHERE a.task_id = t.id)".to_string()
+        } else {
+            "NOT EXISTS (SELECT 1 FROM attachments a WHERE a.task_id = t.id)".to_string()
+        });
+    }
 
-    let mut sql = String::from("SELECT t.* FROM tasks t");
+    let mut sql = String::from(
+        "SELECT t.*, EXISTS (SELECT 1 FROM attachments a WHERE a.task_id = t.id) AS has_attachment FROM tasks t",
+    );
     if !where_parts.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&where_parts.join(" AND "));
@@ -146,6 +155,7 @@ async fn build_tasks(rows: Vec<sqlx::sqlite::SqliteRow>, db: &Db) -> Result<Vec<
             remark: r.try_get::<String, _>("remark").unwrap_or_default(),
             created_at: r.try_get::<String, _>("created_at").unwrap_or_default(),
             updated_at: r.try_get::<String, _>("updated_at").unwrap_or_default(),
+            has_attachment: r.try_get::<i64, _>("has_attachment").unwrap_or(0) != 0,
             delays: Vec::new(),
         };
         by_id.insert(id, tasks.len());
@@ -198,7 +208,8 @@ pub async fn create_task(State(db): State<Db>, Json(req): Json<CreateTaskReq>) -
         id, meeting_no: meeting.to_string(), task_no,
         task_desc: req.task_desc, dept: req.dept, owner: req.owner,
         required_date: req.required_date, actual_date: req.actual_date,
-        remark: req.remark, created_at: now.clone(), updated_at: now, delays: vec![],
+        remark: req.remark, created_at: now.clone(), updated_at: now,
+        has_attachment: false, delays: vec![],
     }))
 }
 

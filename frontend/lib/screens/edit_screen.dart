@@ -26,6 +26,7 @@ class _EditScreenState extends State<EditScreen> {
   bool _saving = false;
   List<Attachment> _attachments = [];
   bool _loadingAttachments = true;
+  bool _attachmentsChanged = false;
 
   @override
   void initState() {
@@ -85,7 +86,10 @@ class _EditScreenState extends State<EditScreen> {
     final bytes = await File(file.path!).readAsBytes();
     try {
       final att = await Api.uploadAttachment(widget.task.id!, bytes, file.name);
-      setState(() => _attachments.add(att));
+      setState(() {
+        _attachments.add(att);
+        _attachmentsChanged = true;
+      });
     } catch (e) {
       _toast('上传附件失败: $e');
     }
@@ -94,7 +98,10 @@ class _EditScreenState extends State<EditScreen> {
   Future<void> _deleteAttachment(int id) async {
     try {
       await Api.deleteAttachment(id);
-      setState(() => _attachments.removeWhere((a) => a.id == id));
+      setState(() {
+        _attachments.removeWhere((a) => a.id == id);
+        _attachmentsChanged = true;
+      });
     } catch (e) {
       _toast('删除附件失败: $e');
     }
@@ -283,7 +290,10 @@ class _EditScreenState extends State<EditScreen> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+        TextButton(
+          onPressed: () => Navigator.pop(context, _attachmentsChanged),
+          child: const Text('取消'),
+        ),
         FilledButton(
           onPressed: _saving ? null : _save,
           child: const Text('保存'),

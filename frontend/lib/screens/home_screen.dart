@@ -21,10 +21,10 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   static const _columnLabels = [
     '序号', '会议纪要号', '任务序号', '任务内容', '责任部门',
-    '责任人', '计划完成时间', '实际完成时间', '最后延期', '延期理由', '备注',
+    '责任人', '计划完成时间', '实际完成时间', '最后延期', '延期理由', '附件', '备注',
   ];
   static const _defaultWidths = [
-    60.0, 120.0, 80.0, 200.0, 100.0, 80.0, 120.0, 120.0, 120.0, 150.0, 150.0
+    60.0, 120.0, 80.0, 200.0, 100.0, 80.0, 120.0, 120.0, 120.0, 150.0, 60.0, 150.0
   ];
 
   List<Task> _tasks = [];
@@ -191,6 +191,9 @@ class _HomeScreenState extends State<HomeScreen> {
       p.add('延期时间[${f.delayDateFrom ?? ''}~${f.delayDateTo ?? ''}]');
     }
     if (f.delayIndex != null) p.add('延期次数>=${f.delayIndex}');
+    if (f.hasAttachment != null) {
+      p.add(f.hasAttachment! ? '有附件' : '无附件');
+    }
     return p.join(', ');
   }
 
@@ -382,6 +385,7 @@ class _HomeScreenState extends State<HomeScreen> {
       t.actualDate,
       lastDelay?.delayDate ?? '',
       lastDelay?.delayReason ?? '',
+      t.hasAttachment ? '有' : '无',
       t.remark,
     ];
     return Container(
@@ -747,6 +751,7 @@ class _ViewTaskDialog extends StatelessWidget {
               _row('责任人', task.owner),
               _row('计划完成时间', task.requiredDate),
               _row('实际完成时间', task.actualDate),
+              _row('附件', task.hasAttachment ? '有' : '无'),
               _row('备注', task.remark),
               const Divider(height: 24),
               Text('延期记录（共 ${task.delays.length} 条）',
