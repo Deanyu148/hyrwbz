@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 import 'screens/home_screen.dart';
 
-late Process _backendProcess;
+Process? _backendProcess;
 late int _backendPort;
 
 Future<void> main() async {
@@ -81,13 +81,21 @@ String? _resolveBackendExe() {
 }
 
 Future<void> _killBackend() async {
+  final process = _backendProcess;
+  if (process == null) return;
+
+  // 先清空引用，避免关闭事件重复触发时重复执行 taskkill。
+  _backendProcess = null;
   try {
     if (Platform.isWindows) {
-      // detached 进程用 taskkill 连同子进程一起强制结束，比 Process.kill 可靠
+      // detached 进程用 taskkill 连同子进程一起强制结束，比 Process.kill 可靠。
+      // 关闭流程不能无限等待外部命令，否则窗口会表现为“卡死”。
       await Process.run(
-          'taskkill', <String>['/PID', _backendProcess.pid.toString(), '/T', '/F']);
+        'taskkill',
+        <String>['/PID', process.pid.toString(), '/T', '/F'],
+      ).timeout(const Duration(seconds: 3));
     } else {
-      _backendProcess.kill();
+      process.kill();
     }
   } catch (_) {}
 }
@@ -127,6 +135,8 @@ class _KillOnClose extends StatefulWidget {
 }
 
 class _KillOnCloseState extends State<_KillOnClose> with WindowListener {
+  bool _isClosing = false;
+
   @override
   void initState() {
     super.initState();
@@ -141,18 +151,29 @@ class _KillOnCloseState extends State<_KillOnClose> with WindowListener {
 
   @override
   void onWindowClose() async {
-    // Save window size and position before closing
+    // Windows 关闭消息可能重复到达；只允许第一个关闭流程继续。
+    if (_isClosing) return;
+    _isClosing = true;
+
     try {
-      final size = await windowManager.getSize();
-      final pos = await windowManager.getPosition();
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setDouble('window_width', size.width);
-      await prefs.setDouble('window_height', size.height);
-      await prefs.setDouble('window_x', pos.dx);
-      await prefs.setDouble('window_y', pos.dy);
-    } catch (_) {}
-    await _killBackend();
-    await windowManager.destroy();
+      // Save window size and position before closing
+      try {
+        final size = await windowManager.getSize();
+        final pos = await windowManager.getPosition();
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setDouble('window_width', size.width);
+        await prefs.setDouble('window_height', size.height);
+        await prefs.setDouble('window_x', pos.dx);
+        await prefs.setDouble('window_y', pos.dy);
+      } catch (_) {}
+      await _killBackend();
+    } finally {
+      // destroy() 后不应再次被 setPreventClose 拦截，否则关闭会陷入循环。
+      try {
+        await windowManager.setPreventClose(false);
+        await windowManager.destroy();
+      } catch (_) {}
+    }
   }
 
   @override
