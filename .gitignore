@@ -1,3 +1,7 @@
 # history
 .history/
 
+# 临时文件
+.idea/
+.vscode/
+scripts/__pycache__/
