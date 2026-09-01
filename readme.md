@@ -1,156 +1,615 @@
-# 会议任务管理跟踪系统 (HYRWBZ)
+# 会议任务管理跟踪系统（HYRWBZ）
 
-基于 Rust 后端 + Flutter 前端 + SQLite 数据库的会议任务跟踪管理系统，打包为 Windows 10/11 兼容安装软件。
+HYRWBZ 是一套面向 Windows 桌面的会议任务管理与跟踪工具，用于维护会议纪要任务、延期记录、责任部门、责任人、附件、筛选结果和历史快照。
 
-## 用户原始需求
+项目采用 **Flutter 桌面前端 + Rust 异步后端 + SQLite**。前端启动时自动拉起同目录的后端进程，二者通过本地套接字通信，不开放 HTTP/TCP 端口；最终可生成 Windows 10/11 安装包和便携版压缩包。
 
-以下是用户给出的原始需求，逐字保留：
+## 目录
 
-> 我现在有一个项目需求，使用rust后端加flutter前端构建。需求如下：
-> 1.需接入SQLite数据库，可以相互导入/导出，且不加密。
-> 2.任务完成后需构建Windows端软件，使用inno setup安装软件，需兼容Windows 10和Windows 11。
-> 3.数据库模板已经放在仓库当中，文件名为template.csv，自行决定数据类型，其中要求"完成时间,实际完成时间,延期时间1,延期时间2,延期时间3,延期时间…"都是确定的日期，格式为YYYY/MM/DD。
-> 4.数据条目需要导出，导出时采用Excel表格，导出内容由用户选择确定，即用户在软件中筛选完毕数据后，按筛选后的内容导出。
-> 5.保留5份历史记录，导出Excel Sheet 1为当前数据，Sheet 2为第一份历史记录，做好Sheet的重命名，命名规则为保存的时间
->
-> 以下是软件界面要求：
-> 1.主界面要有添加/删除条目按钮，以及添加/删除延期按钮，在主界面要把重心放在显示具体数据条目上。
-> 2.添加条目时，会议号由用户输入，内容为一串字符串，任务号从1开始，每次自动加1，每次添加不同会议号任务号都从1开始，当前存在的会议号，任务号自动获取最大值加1。
-> 3.添加延期时，弹出延期窗口，由用户输入延期日期以及延期理由，延期日期的数据表结构自行确定，需要与会议号以及任务号关联，最大保留20条延期记录。
-> 4.双击数据库条目打开编辑窗口，编辑窗口要可以编辑所有数据条目，并且添加一个确定框，由用户确定是否锁定当前会议号，锁定成功后下一次添加条目自动填入会议号，确定框需要持久化，即一直添加条目，只要用户不主动解锁会议号就自动填入会议号。
-> 2.要有统计功能，即按照"会议号,任务号,责任部门,责任人,要求完成时间,实际完成时间,延期时间1,延期时间2,延期时间3,延期时间…"完成筛选，其中日期筛选需要弹出日期选择窗口，由用户确定起止日期，起止日期的确定需要有日期选择框和输入框，保证可以手动键盘输入日期，统计条件确定后自动在主界面显示。
->
-> 全部要求完成后编写一份cnb流水线用于编译Windows软件，编译结果自动新建tag保存到release。将这份需求写入readme
+- [主要功能](#主要功能)
+- [快速使用](#快速使用)
+- [数据导入与导出](#数据导入与导出)
+- [数据与配置文件位置](#数据与配置文件位置)
+- [系统架构](#系统架构)
+- [数据库结构](#数据库结构)
+- [本地开发](#本地开发)
+- [测试与构建](#测试与构建)
+- [发布流水线](#发布流水线)
+- [项目结构](#项目结构)
+- [已知约束](#已知约束)
 
-## 技术架构
+## 主要功能
 
-### 单 EXE 启动机制
+### 任务管理
 
-为避免后端弹出控制台黑窗、并让前后端真正连通，采用 Flutter Windows 桌面 GUI 主进程 + Rust 后端子进程模式：
+- 添加、查看、编辑和批量删除任务。
+- 同一会议纪要号下，任务序号自动取当前最大值加一。
+- 不同会议纪要号分别从任务序号 `1` 开始。
+- 双击主表记录可打开编辑窗口，单击或长按可查看详情。
+- 支持在添加任务时先选择多个附件，任务创建后自动上传。
+- 支持在编辑窗口上传、下载和删除附件。
 
-1. 桌面图标双击 → 启动 Flutter Windows GUI (hyrwbz_frontend.exe)
-2. Flutter main() 启动时生成唯一 LocalSocket 地址并拉起同目录的 hyrwbz_backend.exe
-3. Windows 使用命名管道 `\\.\pipe\hyrwbz_<pid>_<nonce>`，不监听 TCP 端口
-4. 前后端通过带长度帧头的 JSON RPC 与原始二进制载荷通信
-5. 前端在 10 秒内等待本地服务就绪，失败时显示错误提示
-6. 导入、附件等二进制数据直接通过 LocalSocket 传输，不使用 Base64
-7. 前端退出后主动结束后端，后端同时通过 parent-pid 看门狗兜底退出
+### 会议纪要号锁定
 
-### 数据存储
+编辑任务时可以锁定当前会议纪要号。锁定后，新建任务会自动填入该会议纪要号；取消锁定后恢复手动输入。锁定状态保存在 SQLite 的 `meta` 表中，重启应用后仍然有效。
 
-- SQLite 文件：%APPDATA%/hyrwbz/data.db（不加密）
-- Excel 导出目录：%APPDATA%/hyrwbz/exports/
-- 数据库导入：用户选择外部 data.db 覆盖当前
+### 延期记录
+
+- 为单个任务添加延期日期和延期理由。
+- 查看并删除历史延期记录。
+- 每个任务最多保留最近 `20` 条延期记录；超过上限时自动删除最早记录。
+- 主表显示最近一次延期日期和延期理由。
+- 任务详情和 Excel 导出可展示完整延期历史。
+
+### 多条件筛选
+
+支持组合使用以下条件：
+
+- 会议纪要号：模糊匹配。
+- 任务序号：精确匹配。
+- 责任部门：模糊匹配，多个值使用英文逗号分隔，值之间为“或”关系。
+- 责任人：模糊匹配，多个值使用英文逗号分隔，值之间为“或”关系。
+- 计划完成时间：开始日期和结束日期。
+- 实际完成时间：开始日期和结束日期。
+- 延期时间：开始日期和结束日期，只要任一延期记录落入范围即可。
+- 延期次数：筛选延期记录数量大于或等于指定值的任务。
+- 附件状态：全部、有附件或无附件。
+
+添加、编辑和筛选界面的责任部门/责任人输入框会自动把常见中文逗号、顿号等转换为英文逗号。例如：
+
+```text
+工程部，技术部、质量部
+```
+
+会自动转换为：
+
+```text
+工程部,技术部,质量部
+```
+
+### 日期输入
+
+日期选择窗口同时提供日历和手动输入框，使用严格格式：
+
+```text
+YYYY/MM/DD
+```
+
+可选择的年份范围为 `2000` 至 `2100`。
+
+### 历史快照
+
+- 可手动保存当前全部任务及延期数据的历史快照。
+- 最多保留最近 `5` 份，超出后自动删除最早快照。
+- Excel 导出时，当前筛选结果写入“当前数据”工作表，历史快照按保存时间写入后续工作表。
+
+### 主表布局与窗口状态
+
+- 主表总宽度始终适配窗口内容宽度。
+- 可拖动表头列边界调整相邻列宽。
+- 列宽有最小值限制，避免栏目被完全压缩。
+- 调整窗口大小时，已设置的列宽按比例适配新窗口。
+- 自动保存并恢复窗口大小、位置、最大化状态和各列宽度。
+- 当保存的窗口位置不再位于当前显示器范围内时，会自动修正到可见区域。
+
+## 快速使用
+
+### 安装版
+
+1. 从 Release 下载 `hyrwbz_setup_<版本号>.exe`。
+2. 运行安装程序。
+3. 通过桌面或开始菜单中的“会议任务管理跟踪系统”启动。
+4. 前端会自动启动同目录下的 `hyrwbz_backend.exe`，无需单独运行服务。
+
+### 便携版
+
+1. 下载 `hyrwbz_portable_<版本号>.zip`。
+2. 完整解压到一个可写目录。
+3. 运行 `hyrwbz_frontend.exe`。
+4. 请勿只复制前端 EXE；Flutter DLL、`data` 目录和 `hyrwbz_backend.exe` 必须保持在发布目录中。
+
+> 应用会在程序目录写入数据库、附件和默认导出文件。便携版应解压到当前用户具有写权限的位置。
+
+## 数据导入与导出
+
+### CSV 模板
+
+仓库根目录的 `template.csv` 给出了基础列顺序：
+
+```csv
+序号,会议纪要号,任务序号,任务内容,责任部门,责任人,计划完成时间,延期时间,实际完成时间,备注
+```
+
+导入时以中文表头名称定位列，因此建议保留上述列名。
+
+### 导入 Excel
+
+支持选择 `.xlsx` 或 `.xls` 文件，后端使用 `calamine` 自动识别格式。
+
+导入规则：
+
+- 只读取工作簿的第一个工作表。
+- 以“会议纪要号 + 任务序号”作为任务唯一标识。
+- 已存在的任务会更新，不存在的任务会创建。
+- 识别基础表头中的“延期时间”，同时兼容系统 Excel 导出中的“延期1”。
+- 当前导入逻辑一次读取一列延期日期；完整多次延期应在软件中维护。
+- 缺少会议纪要号或任务序号为 `0`/无法解析的行会跳过。
+- 对部分缺少 `xl/_rels/workbook.xml.rels` 的精简 XLSX 文件会尝试自动修复后读取。
+
+在选择文件前，应用会询问是否把文件中的“备注”移动到数据库的“延期理由”：
+
+- **否，保留备注**：默认选项，备注继续写入任务备注。
+- **是，移动**：当该行存在延期日期时，清空任务备注并把备注写入对应延期理由。
+- 如果该行没有延期日期，即使选择“移动”，备注也仍保留在任务备注中，避免内容丢失。
+- 如果相同任务、相同延期日期的记录已经存在，选择“移动”会更新已有延期理由，不会重复创建延期。
+
+### 导入 CSV
+
+CSV 导入与 Excel 使用相同的任务更新、延期和备注移动规则，并支持：
+
+- UTF-8；
+- UTF-8 BOM；
+- GBK（常见于中文版 Excel 另存为 CSV）。
+
+### 导出 Excel
+
+Excel 导出基于当前主界面的筛选条件：
+
+- 文件名：`hyrwbz_export_YYYYMMDD_HHMMSS.xlsx`。
+- 第一个工作表名为“当前数据”，内容为当前筛选结果。
+- 后续最多包含 `5` 个历史快照工作表。
+- 快照工作表使用保存时间命名，例如 `20260902_013045`。
+- 延期列按当前数据中的最大延期次数动态生成：`延期1/理由1`、`延期2/理由2`……
+- 导出时可选择目标目录；取消目录选择时使用程序目录下的 `exports`。
+
+### 导出 CSV
+
+CSV 导出同样使用当前筛选条件：
+
+- 文件名：`hyrwbz_export_YYYYMMDD_HHMMSS.csv`。
+- 使用 UTF-8 BOM，便于 Excel 直接打开中文内容。
+- 列结构与 `template.csv` 一致。
+- 当任务有多条延期记录时，CSV 只导出第一条延期日期；如需完整延期历史，请使用 Excel 导出。
+
+### 导入/导出数据库
+
+- 导出数据库会把当前 `data.db` 复制为 `exports/data_YYYYMMDD_HHMMSS.db`。
+- 导入数据库通过 SQLite `ATTACH`，按表替换 `tasks`、`delays`、`meta`、`snapshots` 和 `attachments` 的数据。
+- 数据库文件不加密，可以使用 SQLite 工具直接查看。
+
+> 数据库导入/导出只处理 SQLite 文件。附件二进制保存在独立的 `attachments` 目录中，不会随单个 `.db` 文件复制；需要完整备份时，请同时备份 `data.db` 和 `attachments` 目录。
+
+## 数据与配置文件位置
+
+### 程序目录
+
+后端以自身可执行文件所在目录为数据根目录：
+
+```text
+<程序目录>/
+├── hyrwbz_frontend.exe
+├── hyrwbz_backend.exe
+├── data.db
+├── attachments/
+│   └── <会议纪要号>/<任务序号>/<UUID>_<原文件名>
+└── exports/
+    ├── hyrwbz_export_*.xlsx
+    ├── hyrwbz_export_*.csv
+    └── data_*.db
+```
+
+- `data.db`：主 SQLite 数据库。
+- `attachments/`：附件实体文件。
+- `exports/`：未指定导出目录时的默认输出位置。
+
+### 用户配置目录
+
+窗口和表格布局保存在：
+
+```text
+%APPDATA%/hyrwbz/window_state_v2.json
+%APPDATA%/hyrwbz/task_column_widths_v1.json
+```
+
+若系统没有 `APPDATA` 环境变量，则回退到前端可执行文件目录。
+
+## 系统架构
+
+```text
+┌───────────────────────────────────────────────┐
+│ Flutter Windows 前端                          │
+│                                               │
+│ Home/Edit/Filter/Delay UI                      │
+│        │                                      │
+│        ▼                                      │
+│ Api → LocalRpcClient → dart_ipc               │
+└──────────────────────┬────────────────────────┘
+                       │ 本地套接字
+                       │ Windows: Named Pipe
+                       │ Unix: Unix Domain Socket
+┌──────────────────────▼────────────────────────┐
+│ Rust Tokio 后端                               │
+│                                               │
+│ RPC 分发 → Service → sqlx / SQLite             │
+│                 ├→ Excel / CSV                │
+│                 └→ 附件文件                   │
+└───────────────────────────────────────────────┘
+```
+
+### 进程生命周期
+
+1. 用户启动 `hyrwbz_frontend.exe`。
+2. 前端生成唯一套接字地址：
+   - Windows：`\\.\pipe\hyrwbz_<pid>_<nonce>`；
+   - Linux/macOS：系统临时目录中的 `.sock` 文件。
+3. 前端使用 `--socket-path` 和 `--parent-pid` 参数启动 `hyrwbz_backend.exe`。
+4. 前端最多尝试约 `10` 秒连接并调用 `system.health`。
+5. 前端关闭时主动关闭 RPC 并结束后端进程。
+6. 后端同时每秒检查父进程，父进程消失后自动退出。
+7. Windows Release 后端使用 GUI 子系统，不显示控制台窗口。
+
+### RPC 帧协议
+
+前后端使用持久本地连接。每个帧由以下部分组成：
+
+| 偏移 | 长度 | 内容 |
+| --- | ---: | --- |
+| 0 | 4 字节 | Magic：`HYRW` |
+| 4 | 2 字节 | 协议版本，大端序，当前为 `1` |
+| 6 | 2 字节 | 标志位：响应、错误 |
+| 8 | 4 字节 | JSON 长度，大端序 |
+| 12 | 8 字节 | 二进制载荷长度，大端序 |
+| 20 | 可变 | JSON 元数据 |
+| 后续 | 可变 | 原始二进制数据 |
+
+限制：
+
+- JSON 最大 `1 MiB`；
+- 二进制载荷最大 `512 MiB`；
+- 附件、Excel、CSV 和数据库文件直接传输原始字节，不使用 Base64。
+
+### RPC 方法
+
+| 方法 | 作用 |
+| --- | --- |
+| `system.health` | 健康检查和协议版本 |
+| `task.list` | 按条件查询任务 |
+| `task.create` | 创建任务并自动分配任务序号 |
+| `task.update` | 更新任务 |
+| `task.delete` | 删除任务 |
+| `delay.list` | 查询任务延期记录 |
+| `delay.create` | 添加延期记录 |
+| `delay.delete` | 删除延期记录 |
+| `meeting_lock.get` | 获取锁定的会议纪要号 |
+| `meeting_lock.set` | 设置或清除会议纪要号锁定 |
+| `snapshot.create` | 保存历史快照 |
+| `snapshot.list` | 查询历史快照 |
+| `export.excel` | 导出 Excel |
+| `export.csv` | 导出 CSV |
+| `export.database` | 导出 SQLite 数据库 |
+| `import.excel` | 导入 Excel |
+| `import.csv` | 导入 CSV |
+| `import.database` | 导入 SQLite 数据库 |
+| `attachment.list` | 查询附件 |
+| `attachment.upload` | 上传附件 |
+| `attachment.download` | 下载附件 |
+| `attachment.delete` | 删除附件 |
 
 ## 数据库结构
 
-依据 template.csv，所有日期统一 YYYY/MM/DD。
+数据库迁移位于 `backend/migrations/0001_init.sql`，构建时由 `backend/build.rs` 嵌入后端程序，启动时自动执行。
 
-### tasks 任务表
+### `tasks`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| id | INTEGER PK AUTOINCREMENT | 主键 |
-| meeting_no | TEXT NOT NULL | 会议号 |
-| task_no | INTEGER NOT NULL | 任务号（同会议号下从 1 自增） |
-| task_desc | TEXT | 任务说明 |
-| dept | TEXT | 责任部门 |
-| owner | TEXT | 责任人 |
-| required_date | TEXT | 要求完成时间 |
-| actual_date | TEXT | 实际完成时间 |
-| remark | TEXT | 说明及备注 |
-| created_at | TEXT | 创建时间 |
-| updated_at | TEXT | 更新时间 |
-| | UNIQUE(meeting_no, task_no) | 联合唯一 |
+| `id` | INTEGER PK | 自增主键 |
+| `meeting_no` | TEXT | 会议纪要号 |
+| `task_no` | INTEGER | 同一会议纪要号下的任务序号 |
+| `task_desc` | TEXT | 任务内容 |
+| `dept` | TEXT | 责任部门，可存储逗号分隔的多个值 |
+| `owner` | TEXT | 责任人，可存储逗号分隔的多个值 |
+| `required_date` | TEXT | 计划完成时间 |
+| `actual_date` | TEXT | 实际完成时间 |
+| `remark` | TEXT | 备注 |
+| `created_at` | TEXT | 创建时间 |
+| `updated_at` | TEXT | 更新时间 |
 
-### delays 延期表
+唯一约束：`UNIQUE(meeting_no, task_no)`。
 
-| 字段 | 说明 |
-| --- | --- |
-| id | 主键 |
-| task_id | 关联 tasks.id |
-| meeting_no | 冗余会议号 |
-| task_no | 冗余任务号 |
-| delay_date | 延期日期 YYYY/MM/DD |
-| delay_reason | 延期理由 |
-| created_at | 创建时间 |
+### `delays`
 
-每个 task 最多 20 条，新增第 21 条自动删除最早一条。
-
-### meta 元信息表
-
-| key | value | 说明 |
+| 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| locked_meeting_no | 字符串/空 | 持久化的会议号锁定状态 |
+| `id` | INTEGER PK | 自增主键 |
+| `task_id` | INTEGER | 关联 `tasks.id` |
+| `meeting_no` | TEXT | 冗余保存会议纪要号 |
+| `task_no` | INTEGER | 冗余保存任务序号 |
+| `delay_date` | TEXT | 延期日期 |
+| `delay_reason` | TEXT | 延期理由 |
+| `created_at` | TEXT | 创建时间 |
 
-### snapshots 历史快照表
+### `meta`
 
-| snapshot_id | saved_at | payload |
-| --- | --- | --- |
-| INTEGER PK | TEXT | TEXT (JSON) |
+键值表，目前用于保存：
 
-最多保留 5 份，超出滚动删除最早一份。
-
-## LocalSocket RPC 一览
-
-前后端使用持久 LocalSocket 连接。每个帧包含 20 字节大端序帧头、JSON 元数据以及可选原始二进制载荷。
-
-| RPC 方法 | 说明 |
-| --- | --- |
-| system.health | 健康检查与协议版本 |
-| task.list/create/update/delete | 任务查询及增删改 |
-| delay.list/create/delete | 延期记录管理 |
-| meeting_lock.get/set | 锁定会议号管理 |
-| snapshot.create/list | 历史快照管理 |
-| export.excel/csv/database | 按筛选导出数据 |
-| import.excel/csv/database | 通过二进制载荷导入数据 |
-| attachment.list/upload/delete/download | 附件管理及原始字节传输 |
-
-## Excel 导出规则
-
-- 按当前主界面筛选结果导出
-- 6 个 Sheet：Sheet1=当前数据（重命名为"当前数据"），Sheet2-6=5 份历史记录（重命名为快照保存时间 YYYYMMDD_HHMMSS）
-- 列头遵循 template.csv
-
-## 技术栈
-
-| 层 | 技术 |
-| --- | --- |
-| 后端 | Rust + Tokio LocalSocket RPC + sqlx + SQLite (windows_subsystem=windows) |
-| 前端 | Flutter Windows 桌面 (Process.start 拉起后端) |
-| 数据库 | SQLite (不加密) |
-| 导出 | rust_xlsxwriter |
-| 安装 | Inno Setup |
-| CI/CD | GitHub Actions + CNB 流水线 |
-
-## 目录结构
-
+```text
+locked_meeting_no
 ```
+
+### `snapshots`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `snapshot_id` | INTEGER PK | 自增主键 |
+| `saved_at` | TEXT | 快照时间 |
+| `payload` | TEXT | 任务和延期数据的 JSON |
+
+### `attachments`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | INTEGER PK | 自增主键 |
+| `task_id` | INTEGER | 关联 `tasks.id` |
+| `filename` | TEXT | 用户原始文件名 |
+| `stored_name` | TEXT | `attachments` 目录中的相对存储路径 |
+| `created_at` | TEXT | 上传时间 |
+
+## 本地开发
+
+### 环境要求
+
+Windows 本地完整构建建议安装：
+
+- Windows 10 或 Windows 11 x64；
+- Git；
+- Rust stable，MSVC 工具链；
+- Flutter stable，Dart SDK `>=3.4.0 <4.0.0`；
+- Visual Studio 2022 的“使用 C++ 的桌面开发”组件；
+- Inno Setup 6（仅构建安装包时需要）。
+
+项目主要依赖：
+
+| 层 | 组件 |
+| --- | --- |
+| 后端异步运行时 | Tokio |
+| 本地套接字 | interprocess 2.4.3 |
+| SQLite | sqlx 0.8 |
+| Excel 导出 | rust_xlsxwriter |
+| Excel 导入 | calamine |
+| CSV/编码 | csv、encoding_rs |
+| Flutter IPC | dart_ipc |
+| 窗口管理 | window_manager、screen_retriever |
+| 文件选择 | file_picker |
+
+### 1. 构建后端
+
+```powershell
+Set-Location backend
+cargo test --all-targets
+cargo build --release
+```
+
+输出：
+
+```text
+backend/target/release/hyrwbz_backend.exe
+```
+
+开发环境下，前端也会尝试查找：
+
+```text
+backend/target/debug/hyrwbz_backend.exe
+```
+
+### 2. 生成 Flutter Windows Runner
+
+仓库只保留 `frontend/windows/README.txt` 占位说明，完整 Windows Runner 由 Flutter CLI 生成：
+
+```powershell
+Set-Location frontend
+flutter create --platforms=windows --project-name=hyrwbz_frontend --overwrite .
+git checkout -- lib/ test/ pubspec.yaml
+Remove-Item -Force test\widget_test.dart -ErrorAction SilentlyContinue
+flutter pub get
+```
+
+`flutter create` 会生成默认 `test/widget_test.dart`，该文件引用模板 `MyApp`，因此需要删除并恢复仓库自己的源码、测试和 `pubspec.yaml`。
+
+### 3. 分析、测试并构建前端
+
+```powershell
+flutter analyze
+flutter test
+flutter build windows --release
+```
+
+输出目录：
+
+```text
+frontend/build/windows/x64/runner/Release/
+```
+
+### 4. 组合运行目录
+
+把后端复制到 Flutter Release 目录：
+
+```powershell
+Copy-Item ..\backend\target\release\hyrwbz_backend.exe `
+  build\windows\x64\runner\Release\
+```
+
+然后运行：
+
+```powershell
+.\build\windows\x64\runner\Release\hyrwbz_frontend.exe
+```
+
+## 测试与构建
+
+### 后端测试
+
+```powershell
+Set-Location backend
+cargo test --all-targets
+```
+
+当前测试覆盖：
+
+- RPC 帧二进制往返；
+- 非法 Magic 拒绝；
+- RPC CRUD 与无 Base64 附件传输；
+- Windows 命名管道健康检查；
+- Excel/CSV 导入及备注转延期理由逻辑。
+
+### 前端测试
+
+```powershell
+Set-Location frontend
+flutter analyze
+flutter test
+```
+
+当前测试覆盖：
+
+- RPC 分片输入、连续帧和二进制载荷；
+- 主表列宽总和、拖动限制和窗口缩放适配；
+- 列宽配置序列化；
+- 窗口越界修正和最小尺寸；
+- 中文逗号、顿号等自动转换为英文逗号。
+
+### 本地构建安装包
+
+先完成后端和前端 Release 构建，然后在仓库根目录执行：
+
+```powershell
+New-Item -ItemType Directory -Force installer\dist\frontend | Out-Null
+Copy-Item -Recurse -Force frontend\build\windows\x64\runner\Release\* `
+  installer\dist\frontend\
+Copy-Item -Force backend\target\release\hyrwbz_backend.exe installer\dist\
+
+& 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
+  '/DMyAppVersion=0.1.0' `
+  installer\hyrwbz.iss
+```
+
+安装包输出到：
+
+```text
+build/installer/hyrwbz_setup_0.1.0.exe
+```
+
+安装器配置：
+
+- x64；
+- Windows 最低版本 `10.0.10240`；
+- 支持 Windows 10/11；
+- 可创建桌面快捷方式；
+- 卸载前结束前后端进程。
+
+## 发布流水线
+
+### GitHub Actions
+
+`.github/workflows/build-windows.yml` 是 Windows 构建和发布流水线。
+
+触发方式：
+
+- 向 `main` 推送代码；
+- 手动 `workflow_dispatch`，可选择是否标记为预发布。
+
+只修改 README、工作流、CNB 配置或 `.gitignore` 时不会触发自动构建。
+
+主要步骤：
+
+1. 使用 GitHub Release 列表计算新版本号；没有历史版本时从 `0.1.0` 开始。
+2. 执行 `cargo test --all-targets` 和 Rust Release 构建。
+3. 生成 Flutter Windows Runner。
+4. 执行 `flutter analyze`、`flutter test` 和 Windows Release 构建。
+5. 生成便携版 ZIP。
+6. 使用 Inno Setup 生成安装包。
+7. 上传 Actions Artifact。
+8. 创建 Tag 和 GitHub Release，并上传安装包及便携版。
+
+流水线声明：
+
+```yaml
+permissions:
+  contents: write
+```
+
+并使用 GitHub 自动生成的 `${{ secrets.GITHUB_TOKEN }}` 查询和创建当前仓库 Release，正常情况下不需要手动添加同名 Secret。
+
+### CNB
+
+`.cnb.yml` 当前负责：
+
+- `main` 分支推送后强制镜像到 GitHub 同名分支；
+- 通过网页按钮手动同步到 GitHub；
+- 拉取最近一次 GitHub Actions 运行状态和失败 Job 日志；
+- 把 GitHub Releases 及附件镜像到 CNB。
+
+`.cnb/web_trigger.yml` 定义了网页按钮。CNB 相关的 `GITHUB_TOKEN` 和 `CNB_TOKEN` 通过私有密钥配置注入，不能直接提交到本仓库。
+
+`scripts/mirror_release.py` 仅依赖 Python 标准库，用于同步 Release、Tag 和附件，并处理目标端已有版本及顺序修复。
+
+## 项目结构
+
+```text
 .
-├── backend/                  # Rust 后端
+├── backend/
 │   ├── Cargo.toml
-│   ├── migrations/0001_init.sql
+│   ├── build.rs                    # 将 SQL migration 嵌入后端
+│   ├── migrations/
+│   │   └── 0001_init.sql
 │   └── src/
-│       ├── main.rs            # windows_subsystem=windows + LocalSocket 启动参数
-│       ├── db.rs
-│       ├── models.rs
-│       ├── rpc.rs             # LocalSocket 帧协议与 RPC 分发
-│       ├── service.rs         # 纯业务服务层
-│       ├── excel.rs
-│       └── import_export.rs
-├── frontend/                  # Flutter Windows 桌面
+│       ├── main.rs                 # 参数、父进程看门狗、RPC 服务启动
+│       ├── db.rs                   # SQLite 初始化和数据路径
+│       ├── models.rs               # RPC/数据库数据模型
+│       ├── rpc.rs                  # 本地套接字帧协议与 RPC 分发
+│       ├── service.rs              # 任务、延期、筛选、附件业务逻辑
+│       ├── excel.rs                # Excel 与历史快照导出
+│       └── import_export.rs        # Excel/CSV/数据库导入导出
+├── frontend/
 │   ├── pubspec.yaml
-│   └── lib/
-│       ├── main.dart          # 启动时拉起后端子进程
-│       ├── api.dart            # RPC 业务 API
-│       ├── local_rpc.dart      # LocalSocket 客户端与帧编解码
-│       ├── backend_manager.dart
-│       ├── window_state.dart
-│       ├── models.dart
-│       └── screens/
-├── installer/hyrwbz.iss
-├── .github/workflows/build-windows.yml
+│   ├── lib/
+│   │   ├── main.dart               # Flutter 入口
+│   │   ├── backend_manager.dart    # 后端进程启动和退出管理
+│   │   ├── local_rpc.dart          # RPC 客户端、帧编解码
+│   │   ├── api.dart                # 业务 RPC 封装
+│   │   ├── models.dart             # 前端数据模型
+│   │   ├── input_formatters.dart   # 逗号自动归一化
+│   │   ├── table_layout.dart       # 响应式、可拖动列宽算法
+│   │   ├── table_layout_store.dart # 列宽持久化
+│   │   ├── window_state.dart       # 窗口状态持久化
+│   │   └── screens/
+│   │       ├── home_screen.dart
+│   │       ├── edit_screen.dart
+│   │       ├── delay_screen.dart
+│   │       ├── filter_screen.dart
+│   │       └── date_picker_dialog.dart
+│   ├── test/
+│   └── windows/README.txt          # Windows Runner 生成说明
+├── installer/
+│   └── hyrwbz.iss                  # Inno Setup 安装脚本
+├── scripts/
+│   ├── gen_test_xls.py             # 生成测试 XLS 数据
+│   └── mirror_release.py           # GitHub Release 镜像到 CNB
+├── .github/workflows/
+│   └── build-windows.yml
 ├── .cnb.yml
+├── .cnb/web_trigger.yml
 ├── template.csv
 └── readme.md
 ```
+
+## 已知约束
+
+- 当前正式交付目标是 Windows x64；代码中保留了 Linux/macOS 本地套接字路径，但仓库没有维护对应平台 Runner 和发布流程。
+- 日期字段在 SQLite 中以文本保存。应用日期选择器使用 `YYYY/MM/DD`，直接导入文件时应自行保证格式一致，便于字符串范围筛选。
+- Excel/CSV 导入只处理第一个延期日期列，不会恢复一行中的全部动态延期列。
+- CSV 导出只包含第一条延期日期，不包含延期理由和完整延期历史。
+- SQLite 数据库备份不包含外部附件文件，完整迁移需同时复制 `attachments` 目录。
+- 单独删除附件会同步删除实体文件；删除整条任务时数据库记录会级联清理，但附件目录中可能遗留不再引用的文件。
+- 数据库与附件位于程序目录，运行目录必须具有写权限。
+- 仓库当前未提供许可证文件；分发和使用范围由项目维护者另行确定。
