@@ -116,4 +116,38 @@ class Api {
     final r = await req.send();
     if (r.statusCode != 200) throw Exception(await r.stream.bytesToString());
   }
+
+  static Future<List<Attachment>> listAttachments(int taskId) async {
+    final r = await http.get(Uri.parse(base + '/api/tasks/' + taskId.toString() + '/attachments'));
+    if (r.statusCode != 200) throw Exception(r.body);
+    final list = jsonDecode(r.body) as List;
+    return list.map((e) => Attachment.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  static Future<Attachment> uploadAttachment(int taskId, Uint8List bytes, String filename) async {
+    final req = http.MultipartRequest('POST', Uri.parse(base + '/api/tasks/' + taskId.toString() + '/attachments'))
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final r = await req.send();
+    final body = await r.stream.bytesToString();
+    if (r.statusCode != 200) throw Exception(body);
+    return Attachment.fromJson(jsonDecode(body) as Map<String, dynamic>);
+  }
+
+  static Future<void> deleteAttachment(int id) async {
+    final r = await http.delete(Uri.parse(base + '/api/attachments/' + id.toString()));
+    if (r.statusCode != 200) throw Exception(r.body);
+  }
+
+  static String downloadAttachmentUrl(int id) {
+    return base + '/api/attachments/' + id.toString() + '/download';
+  }
+
+  static Future<Map<String, dynamic>> importExcel(Uint8List bytes, String filename) async {
+    final req = http.MultipartRequest('POST', Uri.parse(base + '/api/import/excel'))
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final r = await req.send();
+    final body = await r.stream.bytesToString();
+    if (r.statusCode != 200) throw Exception(body);
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
 }

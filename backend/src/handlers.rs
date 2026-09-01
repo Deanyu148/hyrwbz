@@ -3,9 +3,13 @@ use crate::db::Db;
 use crate::models::*;
 use anyhow::Result;
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Multipart, Path, Query, State},
+    response::{IntoResponse, Response},
     Json,
 };
+use axum::http::header;
+use axum::body::Bytes;
+use axum::http::HeaderValue;
 use chrono::Local;
 use serde_json::json;
 use sqlx::Row;
@@ -31,6 +35,27 @@ pub async fn list_tasks_inner(db: &Db, f: &FilterReq) -> Result<Vec<Task>, ApiEr
                 where_parts.push(format!("t.{} LIKE ?{}", $field, idx));
                 params.push(format!("%{}%", v));
                 idx += 1;
+            }
+        };
+    }
+    // Multi-value LIKE: splits comma-separated input, joins with OR
+    macro_rules! like_multi {
+        ($field:expr, $val:expr) => {
+            if let Some(v) = $val {
+                let parts: Vec<&str> = v.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+                if !parts.is_empty() {
+                    let mut ors: Vec<String> = Vec::new();
+                    for p in &parts {
+                        ors.push(format!("t.{} LIKE ?{}", $field, idx));
+                        params.push(format!("%{}%", p));
+                        idx += 1;
+                    }
+                    if ors.len() == 1 {
+                        where_parts.push(ors[0].clone());
+                    } else {
+                        where_parts.push(format!("({})", ors.join(" OR ")));
+                    }
+                }
             }
         };
     }
@@ -64,8 +89,8 @@ pub async fn list_tasks_inner(db: &Db, f: &FilterReq) -> Result<Vec<Task>, ApiEr
 
     like!("meeting_no", f.meeting_no.as_ref());
     eq_i!("task_no", f.task_no);
-    like!("dept", f.dept.as_ref());
-    like!("owner", f.owner.as_ref());
+    like_multi!("dept", f.dept.as_ref());
+    like_multi!("owner", f.owner.as_ref());
     between!("required_date", f.required_date_from, f.required_date_to);
     between!("actual_date", f.actual_date_from, f.actual_date_to);
 
@@ -267,9 +292,80 @@ pub async fn delete_attachment(State(db): State<Db>, Path(id): Path<i64>) -> Res
         let stored: String = r.try_get("stored_name").unwrap_or_default();
         let exe = std::env::current_exe().unwrap_or_default();
         let dir = exe.parent().unwrap_or(std::path::Path::new("."));
-        let fpath = dir.join("attachments").join(&stored);
+       let fpath = dir.join("attachments").join(&stored);
         std::fs::remove_file(&fpath).ok();
     }
     sqlx::query("DELETE FROM attachments WHERE id = ?1").bind(id).execute(&db).await.map_err(internal)?;
     Ok(Json(json!({"ok": true})))
+}
+
+fn sanitize_dir_name(s: &str) -> String {
+    s.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
+}
+
+pub async fn upload_attachment(
+    State(db): State<Db>,
+    Path(id): Path<i64>,
+    mut mp: Multipart,
+) -> Result<Json<crate::models::Attachment>, ApiError> {
+    let row = sqlx::query("SELECT meeting_no, task_no FROM tasks WHERE id = ?1")
+        .bind(id).fetch_one(&db).await.map_err(internal)?;
+    let meeting_no: String = row.try_get("meeting_no").unwrap_or_default();
+    let task_no: i64 = row.try_get("task_no").unwrap_or_default();
+
+    let safe_meeting = sanitize_dir_name(&meeting_no);
+    let exe = std::env::current_exe().unwrap_or_default();
+    let base = exe.parent().unwrap_or(std::path::Path::new("."));
+    let attach_base = base.join("attachments");
+
+    while let Ok(Some(field)) = mp.next_field().await {
+        if field.name() == Some("file") {
+            let filename = field.file_name().unwrap_or("unknown").to_string();
+            let data = field.bytes().await.map_err(internal)?;
+
+            let uuid_str = uuid::Uuid::new_v4().to_string();
+            let safe_filename = sanitize_dir_name(&filename);
+            let stored_name = format!("{}/{}/{}_{}", safe_meeting, task_no, uuid_str, safe_filename);
+            let file_path = attach_base.join(&stored_name);
+
+            if let Some(parent) = file_path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::write(&file_path, &data).map_err(internal)?;
+
+            let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            let res = sqlx::query(
+                "INSERT INTO attachments (task_id, filename, stored_name, created_at) VALUES (?1, ?2, ?3, ?4)",
+            ).bind(id).bind(&filename).bind(&stored_name).bind(&now)
+            .execute(&db).await.map_err(internal)?;
+            let aid = res.last_insert_rowid();
+            return Ok(Json(crate::models::Attachment {
+                id: aid, task_id: id, filename, stored_name, created_at: now,
+            }));
+        }
+    }
+    Err(bad("no file field"))
+}
+
+pub async fn download_attachment(
+    State(db): State<Db>,
+    Path(id): Path<i64>,
+) -> Result<Response, ApiError> {
+    let row = sqlx::query("SELECT filename, stored_name FROM attachments WHERE id = ?1")
+        .bind(id).fetch_one(&db).await.map_err(internal)?;
+    let filename: String = row.try_get("filename").unwrap_or_default();
+    let stored_name: String = row.try_get("stored_name").unwrap_or_default();
+
+    let exe = std::env::current_exe().unwrap_or_default();
+    let base = exe.parent().unwrap_or(std::path::Path::new("."));
+    let file_path = base.join("attachments").join(&stored_name);
+    let data = std::fs::read(&file_path).map_err(internal)?;
+
+    let cd = format!("attachment; filename=\"{}\"", filename);
+    let ct = HeaderValue::from_static("application/octet-stream");
+    let cdv = HeaderValue::from_str(&cd).unwrap_or_else(|_| HeaderValue::from_static("attachment"));
+    Ok((
+        [(header::CONTENT_TYPE, ct), (header::CONTENT_DISPOSITION, cdv)],
+        Bytes::from(data),
+    ).into_response())
 }

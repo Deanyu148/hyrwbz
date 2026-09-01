@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io' show File;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../api.dart';
 import '../models.dart';
 import 'edit_screen.dart';
@@ -16,17 +18,46 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const _columnLabels = [
+    '序号', '会议纪要号', '任务序号', '任务内容', '责任部门',
+    '责任人', '计划完成时间', '实际完成时间', '最后延期', '延期理由', '备注',
+  ];
+  static const _defaultWidths = [
+    60.0, 120.0, 80.0, 200.0, 100.0, 80.0, 120.0, 120.0, 120.0, 150.0, 150.0
+  ];
+
   List<Task> _tasks = [];
   bool _loading = true;
   FilterReq _filter = const FilterReq();
   String _filterSummary = '';
   bool _backendOk = true;
   bool _checking = false;
+  final List<Task> _selected = [];
+  List<double> _colWidths = List.from(_defaultWidths);
 
   @override
   void initState() {
     super.initState();
+    _loadColWidths();
     _ensureBackend();
+  }
+
+  Future<void> _loadColWidths() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('col_widths');
+    if (saved != null) {
+      try {
+        final list = (jsonDecode(saved) as List).map((e) => (e as num).toDouble()).toList();
+        if (list.length == _defaultWidths.length) {
+          setState(() => _colWidths = list);
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _saveColWidths() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('col_widths', jsonEncode(_colWidths));
   }
 
   Future<void> _ensureBackend() async {
@@ -37,8 +68,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _checking = false;
     });
     if (!ok) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('无法连接后端服务 (127.0.0.1:7790)。请确保已启动后端程序。'),
+        content: Text('无法连接后端服务。请确保已启动后端程序。'),
         duration: Duration(seconds: 6),
       ));
       return;
@@ -51,6 +83,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       _tasks = await Api.listTasks(_filter);
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('加载失败: $e')));
     }
     setState(() => _loading = false);
@@ -61,7 +94,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _addTask() async {
-    // 添加条目：弹出添加窗口
     final res = await showDialog<bool>(
       context: context,
       builder: (_) => const _AddTaskDialog(),
@@ -115,7 +147,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _delDelay() async {
-    // 删除延期：先打开延期窗口
     final sel = _selected;
     if (sel.length != 1) {
       _toast('请选中一条条目查看/删除延期');
@@ -150,7 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (f.dept != null) p.add('部门~${f.dept}');
     if (f.owner != null) p.add('责任人~${f.owner}');
     if (f.requiredDateFrom != null || f.requiredDateTo != null) {
-      p.add('要求时间[${f.requiredDateFrom ?? ''}~${f.requiredDateTo ?? ''}]');
+      p.add('计划完成[${f.requiredDateFrom ?? ''}~${f.requiredDateTo ?? ''}]');
     }
     if (f.actualDateFrom != null || f.actualDateTo != null) {
       p.add('实际时间[${f.actualDateFrom ?? ''}~${f.actualDateTo ?? ''}]');
@@ -191,6 +222,23 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _importExcel() async {
+    final res = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xlsx', 'xls'],
+    );
+    if (res == null || res.files.single.path == null) return;
+    final path = res.files.single.path!;
+    final bytes = await File(path).readAsBytes();
+    try {
+      final result = await Api.importExcel(bytes, res.files.single.name);
+      _toast('导入成功: 共导入 ${result['imported']} 条记录');
+      await _reload();
+    } catch (e) {
+      _toast('导入失败: $e');
+    }
+  }
+
   Future<void> _saveSnapshot() async {
     try {
       await Api.createSnapshot();
@@ -216,7 +264,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (res == null || res.files.single.path == null) return;
     final path = res.files.single.path!;
-    final bytes = await _readFile(path);
+    final bytes = await File(path).readAsBytes();
     try {
       await Api.importDbFile(bytes, res.files.single.name);
       _toast('数据库导入成功');
@@ -226,12 +274,126 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<Uint8List> _readFile(String path) async {
-    // 使用 dart:io 读取
-    return await File(path).readAsBytes();
+  // ---- Custom resizable table builders ----
+
+  Widget _buildHeaderRow() {
+    return Container(
+      color: Colors.grey[200],
+      child: Row(
+        children: [
+          SizedBox(
+            width: 48,
+            child: Checkbox(
+              value: _tasks.isNotEmpty && _selected.length == _tasks.length,
+              onChanged: (v) {
+                setState(() {
+                  if (v == true) {
+                    _selected.clear();
+                    _selected.addAll(_tasks);
+                  } else {
+                    _selected.clear();
+                  }
+                });
+              },
+            ),
+          ),
+          for (int i = 0; i < _columnLabels.length; i++)
+            _buildHeaderCell(i, _columnLabels[i]),
+        ],
+      ),
+    );
   }
 
-  final List<Task> _selected = [];
+  Widget _buildHeaderCell(int index, String label) {
+    return SizedBox(
+      width: _colWidths[index],
+      child: Stack(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey[400]!),
+            ),
+            child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            child: MouseRegion(
+              cursor: SystemMouseCursors.resizeColumn,
+              child: GestureDetector(
+                onHorizontalDragUpdate: (details) {
+                  setState(() {
+                    _colWidths[index] = (_colWidths[index] + details.delta.dx).clamp(40.0, 500.0);
+                  });
+                },
+                onHorizontalDragEnd: (_) => _saveColWidths(),
+                child: Container(
+                  width: 6,
+                  color: Colors.transparent,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDataRow(int index, Task t) {
+    final lastDelay = t.delays.isNotEmpty ? t.delays.last : null;
+    final isSelected = _selected.any((x) => x.id == t.id);
+    final cellTexts = [
+      '${index + 1}',
+      t.meetingNo,
+      t.taskNo.toString(),
+      t.taskDesc,
+      t.dept,
+      t.owner,
+      t.requiredDate,
+      t.actualDate,
+      lastDelay?.delayDate ?? '',
+      lastDelay?.delayReason ?? '',
+      t.remark,
+    ];
+    return Container(
+      color: isSelected ? Colors.blue.withOpacity(0.1) : null,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 48,
+            child: Checkbox(
+              value: isSelected,
+              onChanged: (v) {
+                setState(() {
+                  if (v == true) {
+                    _selected.add(t);
+                  } else {
+                    _selected.removeWhere((x) => x.id == t.id);
+                  }
+                });
+              },
+            ),
+          ),
+          for (int i = 0; i < cellTexts.length; i++)
+            GestureDetector(
+              onTap: () => _viewTask(t),
+              onDoubleTap: () => _editTask(t),
+              onLongPress: () => _viewTask(t),
+              child: Container(
+                width: _colWidths[i],
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey[300]!),
+                ),
+                child: Text(cellTexts[i]),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -243,13 +405,13 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(icon: const Icon(Icons.filter_alt), onPressed: _openFilter, tooltip: '统计筛选'),
           IconButton(icon: const Icon(Icons.history), onPressed: _saveSnapshot, tooltip: '保存历史快照'),
           IconButton(icon: const Icon(Icons.file_download), onPressed: _exportExcel, tooltip: '导出Excel'),
+          IconButton(icon: const Icon(Icons.upload_file), onPressed: _importExcel, tooltip: '导入Excel'),
           IconButton(icon: const Icon(Icons.download), onPressed: _exportDb, tooltip: '导出数据库'),
           IconButton(icon: const Icon(Icons.upload), onPressed: _importDb, tooltip: '导入数据库'),
         ],
       ),
       body: Column(
         children: [
-          // 工具条
           Container(
             color: Colors.black.withOpacity(0.04),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -279,7 +441,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (!_backendOk)
             const Padding(
               padding: EdgeInsets.all(8),
-              child: Text('后端未连接，请在应用目录运行后端程序或检查端口 7790。', style: TextStyle(color: Colors.red)),
+              child: Text('后端未连接，请在应用目录运行后端程序或检查端口。', style: TextStyle(color: Colors.red)),
             ),
           Expanded(
             child: _loading
@@ -289,52 +451,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     : SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
                         child: SingleChildScrollView(
-                          child: DataTable(
-                            showCheckboxColumn: true,
-                            columns: const [
-                              DataColumn(label: Text('序号')),
-                              DataColumn(label: Text('会议纪要号')),
-                              DataColumn(label: Text('任务序号')),
-                              DataColumn(label: Text('任务说明')),
-                              DataColumn(label: Text('责任部门')),
-                              DataColumn(label: Text('责任人')),
-                              DataColumn(label: Text('计划完成时间')),
-                              DataColumn(label: Text('实际完成时间')),
-                              DataColumn(label: Text('最后延期')),
-                              DataColumn(label: Text('延期理由')),
-                              DataColumn(label: Text('备注')),
+                          child: Column(
+                            children: [
+                              _buildHeaderRow(),
+                              ..._tasks.asMap().entries.map((e) => _buildDataRow(e.key, e.value)),
                             ],
-                            rows: _tasks.asMap().entries.map((e) {
-                              final i = e.key;
-                              final t = e.value;
-                              final lastDelay = t.delays.isNotEmpty ? t.delays.last : null;
-                              return DataRow(
-                                selected: _selected.any((x) => x.id == t.id),
-                                onSelectChanged: (v) {
-                                  setState(() {
-                                    if (v == true) {
-                                      _selected.add(t);
-                                    } else {
-                                      _selected.removeWhere((x) => x.id == t.id);
-                                    }
-                                  });
-                                },
-                                onLongPress: () => _viewTask(t),
-                                cells: [
-                                  DataCell(Text('${i + 1}'), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.meetingNo), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.taskNo.toString()), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.taskDesc), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.dept), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.owner), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.requiredDate), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.actualDate), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(lastDelay?.delayDate ?? ''), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(lastDelay?.delayReason ?? ''), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
-                                  DataCell(Text(t.remark), onTap: () => _viewTask(t), onDoubleTap: () => _editTask(t)),
-                                ],
-                              );
-                            }).toList(),
                           ),
                         ),
                       ),
@@ -361,6 +482,7 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
   late final TextEditingController _remark;
   String? _lockedMeeting;
   bool _saving = false;
+  final List<_PendingFile> _pendingFiles = [];
 
   @override
   void initState() {
@@ -414,7 +536,12 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
         actualDate: _actual.text,
         remark: _remark.text,
       );
-      await Api.createTask(t);
+      final created = await Api.createTask(t);
+      for (final pf in _pendingFiles) {
+        try {
+          await Api.uploadAttachment(created.id!, pf.bytes, pf.name);
+        } catch (_) {}
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       _toast('添加失败: $e');
@@ -432,6 +559,17 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
       builder: (_) => DatePickerDialogWidget(initial: c.text, title: title),
     );
     if (v != null) setState(() => c.text = v);
+  }
+
+  Future<void> _pickAttachment() async {
+    final res = await FilePicker.platform.pickFiles();
+    if (res == null || res.files.isEmpty) return;
+    final file = res.files.first;
+    if (file.path == null) return;
+    final bytes = await File(file.path!).readAsBytes();
+    setState(() {
+      _pendingFiles.add(_PendingFile(name: file.name, bytes: bytes));
+    });
   }
 
   @override
@@ -463,7 +601,12 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
                 enabled: _lockedMeeting == null || _lockedMeeting!.isEmpty,
               ),
               const SizedBox(height: 8),
-              TextField(controller: _taskDesc, decoration: const InputDecoration(labelText: '任务说明'), maxLines: 2),
+              TextField(
+                controller: _taskDesc,
+                decoration: const InputDecoration(labelText: '任务内容'),
+                maxLines: 3,
+                minLines: 3,
+              ),
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -496,6 +639,36 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
               ),
               const SizedBox(height: 8),
               TextField(controller: _remark, decoration: const InputDecoration(labelText: '备注'), maxLines: 2),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Text('附件', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.attach_file),
+                    onPressed: _pickAttachment,
+                    tooltip: '添加附件',
+                  ),
+                ],
+              ),
+              if (_pendingFiles.isEmpty)
+                const Padding(padding: EdgeInsets.all(8), child: Text('暂无附件'))
+              else
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 150),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _pendingFiles.length,
+                    itemBuilder: (_, i) => ListTile(
+                      leading: const Icon(Icons.attachment),
+                      title: Text(_pendingFiles[i].name),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => setState(() => _pendingFiles.removeAt(i)),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -508,7 +681,12 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
   }
 }
 
-/// 单击条目打开的查看窗口，显示全部延期和理由
+class _PendingFile {
+  final String name;
+  final Uint8List bytes;
+  _PendingFile({required this.name, required this.bytes});
+}
+
 class _ViewTaskDialog extends StatelessWidget {
   final Task task;
   const _ViewTaskDialog({required this.task});
@@ -526,7 +704,7 @@ class _ViewTaskDialog extends StatelessWidget {
             children: [
               _row('会议纪要号', task.meetingNo),
               _row('任务序号', task.taskNo.toString()),
-              _row('任务说明', task.taskDesc),
+              _row('任务内容', task.taskDesc),
               _row('责任部门', task.dept),
               _row('责任人', task.owner),
               _row('计划完成时间', task.requiredDate),

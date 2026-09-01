@@ -1,4 +1,6 @@
+import 'dart:io' show File, Platform, Process;
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import '../api.dart';
 import '../models.dart';
 import 'date_picker_dialog.dart';
@@ -22,6 +24,8 @@ class _EditScreenState extends State<EditScreen> {
   late final TextEditingController _remark;
   bool _lock = false;
   bool _saving = false;
+  List<Attachment> _attachments = [];
+  bool _loadingAttachments = true;
 
   @override
   void initState() {
@@ -36,6 +40,7 @@ class _EditScreenState extends State<EditScreen> {
     _actual = TextEditingController(text: t.actualDate);
     _remark = TextEditingController(text: t.remark);
     _loadLock();
+    _loadAttachments();
   }
 
   @override
@@ -54,6 +59,57 @@ class _EditScreenState extends State<EditScreen> {
   Future<void> _loadLock() async {
     final l = await Api.getLockedMeeting();
     setState(() => _lock = l == widget.task.meetingNo);
+  }
+
+  Future<void> _loadAttachments() async {
+    try {
+      final atts = await Api.listAttachments(widget.task.id!);
+      setState(() {
+        _attachments = atts;
+        _loadingAttachments = false;
+      });
+    } catch (e) {
+      setState(() => _loadingAttachments = false);
+    }
+  }
+
+  void _toast(String s) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+  }
+
+  Future<void> _pickAttachment() async {
+    final res = await FilePicker.platform.pickFiles();
+    if (res == null || res.files.isEmpty) return;
+    final file = res.files.first;
+    if (file.path == null) return;
+    final bytes = await File(file.path!).readAsBytes();
+    try {
+      final att = await Api.uploadAttachment(widget.task.id!, bytes, file.name);
+      setState(() => _attachments.add(att));
+    } catch (e) {
+      _toast('上传附件失败: $e');
+    }
+  }
+
+  Future<void> _deleteAttachment(int id) async {
+    try {
+      await Api.deleteAttachment(id);
+      setState(() => _attachments.removeWhere((a) => a.id == id));
+    } catch (e) {
+      _toast('删除附件失败: $e');
+    }
+  }
+
+  void _openUrl(String url) {
+    try {
+      if (Platform.isWindows) {
+        Process.run('cmd', ['/c', 'start', '', url]);
+      } else if (Platform.isMacOS) {
+        Process.run('open', [url]);
+      } else {
+        Process.run('xdg-open', [url]);
+      }
+    } catch (_) {}
   }
 
   Future<void> _save() async {
@@ -126,8 +182,9 @@ class _EditScreenState extends State<EditScreen> {
               const SizedBox(height: 8),
               TextField(
                 controller: _taskDesc,
-                decoration: const InputDecoration(labelText: '任务说明'),
-                maxLines: 2,
+                decoration: const InputDecoration(labelText: '任务内容'),
+                maxLines: 3,
+                minLines: 3,
               ),
               const SizedBox(height: 8),
               Row(
@@ -166,6 +223,53 @@ class _EditScreenState extends State<EditScreen> {
                 maxLines: 2,
               ),
               const SizedBox(height: 8),
+              // Attachment section
+              Row(
+                children: [
+                  const Text('附件', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.attach_file),
+                    onPressed: _pickAttachment,
+                    tooltip: '添加附件',
+                  ),
+                ],
+              ),
+              if (_loadingAttachments)
+                const Padding(padding: EdgeInsets.all(8), child: Center(child: CircularProgressIndicator()))
+              else if (_attachments.isEmpty)
+                const Padding(padding: EdgeInsets.all(8), child: Text('暂无附件'))
+              else
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _attachments.length,
+                    itemBuilder: (_, i) {
+                      final a = _attachments[i];
+                      return ListTile(
+                        leading: const Icon(Icons.attachment),
+                        title: Text(a.filename),
+                        subtitle: Text(a.createdAt),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.download),
+                              onPressed: () => _openUrl(Api.downloadAttachmentUrl(a.id)),
+                              tooltip: '下载',
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline),
+                              onPressed: () => _deleteAttachment(a.id),
+                              tooltip: '删除',
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
               CheckboxListTile(
                 value: _lock,
                 onChanged: (v) => setState(() => _lock = v ?? false),

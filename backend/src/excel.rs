@@ -76,9 +76,9 @@ fn write_sheet(
 ) -> Result<()> {
     // 动态计算最大延期数
     let max_delays = tasks.iter().map(|t| t.delays.len()).max().unwrap_or(0);
-    // 基础表头
+    // 基础表头 ("任务说明" renamed to "任务内容")
     let base_headers = [
-        "序号", "会议纪要号", "任务序号", "任务说明", "责任部门", "责任人",
+        "序号", "会议纪要号", "任务序号", "任务内容", "责任部门", "责任人",
         "计划完成时间", "实际完成时间",
     ];
     // 写基础表头
@@ -146,3 +146,4 @@ fn default_export_dir() -> PathBuf {
     let dir = exe.parent().unwrap_or_else(|| std::path::Path::new("."));
     dir.join("exports")
 }
+

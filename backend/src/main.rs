@@ -54,10 +54,14 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/delays/:id", delete(handlers::delete_delay))
         .route("/api/locked-meeting", get(handlers::get_locked).put(handlers::set_locked))
         .route("/api/export/excel", post(handle_export_excel))
+        .route("/api/import/excel", post(handle_import_excel))
         .route("/api/snapshot", post(handle_snapshot))
         .route("/api/snapshots", get(handle_list_snapshots))
         .route("/api/db/export", get(handle_db_export))
         .route("/api/db/import", post(handle_db_import))
+        .route("/api/tasks/:id/attachments", get(handlers::list_attachments).post(handlers::upload_attachment))
+        .route("/api/attachments/:id", delete(handlers::delete_attachment))
+        .route("/api/attachments/:id/download", get(handlers::download_attachment))
         .layer(cors)
         .with_state(pool);
 
@@ -103,7 +107,7 @@ async fn handle_db_export(State(_db): State<db::Db>) -> impl IntoResponse {
     }
 }
 
-async fn handle_db_import(State(_db): State<db::Db>, mut mp: Multipart) -> impl IntoResponse {
+async fn handle_db_import(State(db): State<db::Db>, mut mp: Multipart) -> impl IntoResponse {
     while let Ok(Some(field)) = mp.next_field().await {
         let name = field.name().unwrap_or("").to_string();
         if name == "file" || name == "db" {
@@ -115,9 +119,41 @@ async fn handle_db_import(State(_db): State<db::Db>, mut mp: Multipart) -> impl 
             if let Err(e) = std::fs::write(&tmp, &data) {
                 return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
             }
-            match import_export::import_db_file(tmp.to_string_lossy().as_ref()).await {
-                Ok(_) => return (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
-                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            match import_export::import_db_file(&db, tmp.to_string_lossy().as_ref()).await {
+                Ok(_) => {
+                    std::fs::remove_file(&tmp).ok();
+                    return (StatusCode::OK, Json(json!({"ok": true}))).into_response();
+                }
+                Err(e) => {
+                    std::fs::remove_file(&tmp).ok();
+                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+                }
+            }
+        }
+    }
+    (StatusCode::BAD_REQUEST, "no file field".to_string()).into_response()
+}
+
+async fn handle_import_excel(State(db): State<db::Db>, mut mp: Multipart) -> impl IntoResponse {
+    while let Ok(Some(field)) = mp.next_field().await {
+        if field.name() == Some("file") {
+            let data = match field.bytes().await {
+                Ok(b) => b,
+                Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+            };
+            let tmp = std::env::temp_dir().join(format!("hyrwbz_excel_{}.xlsx", uuid::Uuid::new_v4()));
+            if let Err(e) = std::fs::write(&tmp, &data) {
+                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+            }
+            match import_export::import_excel(&db, tmp.to_string_lossy().as_ref()).await {
+                Ok(r) => {
+                    std::fs::remove_file(&tmp).ok();
+                    return (StatusCode::OK, Json(json!({"imported": r.imported, "errors": r.errors}))).into_response();
+                }
+                Err(e) => {
+                    std::fs::remove_file(&tmp).ok();
+                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+                }
             }
         }
     }

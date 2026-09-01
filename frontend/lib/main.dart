@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 import 'screens/home_screen.dart';
 
@@ -15,6 +16,18 @@ Future<void> main() async {
     await windowManager.ensureInitialized();
     await windowManager.setTitle('会议任务管理跟踪系统');
     await windowManager.setMinimumSize(const Size(900, 600));
+    // Restore saved window size and position
+    final prefs = await SharedPreferences.getInstance();
+    final w = prefs.getDouble('window_width');
+    final h = prefs.getDouble('window_height');
+    if (w != null && h != null) {
+      await windowManager.setSize(Size(w, h));
+    }
+    final x = prefs.getDouble('window_x');
+    final y = prefs.getDouble('window_y');
+    if (x != null && y != null) {
+      await windowManager.setPosition(Offset(x, y));
+    }
   }
   await _startBackend();
   runApp(const HyrwbzApp());
@@ -120,6 +133,16 @@ class _KillOnCloseState extends State<_KillOnClose> with WindowListener {
 
   @override
   void onWindowClose() async {
+    // Save window size and position before closing
+    try {
+      final size = await windowManager.getSize();
+      final pos = await windowManager.getPosition();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble('window_width', size.width);
+      await prefs.setDouble('window_height', size.height);
+      await prefs.setDouble('window_x', pos.dx);
+      await prefs.setDouble('window_y', pos.dy);
+    } catch (_) {}
     await _killBackend();
     await windowManager.destroy();
   }

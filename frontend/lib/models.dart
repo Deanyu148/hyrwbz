@@ -30,6 +30,28 @@ class Delay {
       };
 }
 
+class Attachment {
+  final int id;
+  final int taskId;
+  final String filename;
+  final String storedName;
+  final String createdAt;
+  Attachment({
+    required this.id,
+    required this.taskId,
+    required this.filename,
+    required this.storedName,
+    required this.createdAt,
+  });
+  factory Attachment.fromJson(Map<String, dynamic> j) => Attachment(
+        id: (j['id'] as num).toInt(),
+        taskId: (j['task_id'] as num).toInt(),
+        filename: j['filename'] as String? ?? '',
+        storedName: j['stored_name'] as String? ?? '',
+        createdAt: j['created_at'] as String? ?? '',
+      );
+}
+
 class Task {
   final int? id;
   final String meetingNo;
