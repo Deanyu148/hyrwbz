@@ -377,7 +377,7 @@ mod tests {
 
         let mut client = None;
         for _ in 0..50 {
-            let name = socket_path.to_fs_name::<GenericFilePath>().unwrap();
+            let name = socket_path.as_str().to_fs_name::<GenericFilePath>().unwrap();
             match Stream::connect(name).await {
                 Ok(stream) => {
                     client = Some(stream);
