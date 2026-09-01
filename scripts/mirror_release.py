@@ -4,7 +4,8 @@
 将 GitHub 仓库的 Releases（含预发布版）镜像同步到 CNB 仓库。
 
 流程：
-1. 通过 GitHub API 获取源仓库全部 release（分页，公开仓库无需认证）。
+1. 通过 GitHub API 获取源仓库全部 release（分页；公开仓库无需认证，
+   私有仓库需提供 GITHUB_TOKEN，且 token 需有该仓库读取权限）。
 2. 通过 CNB API 获取目标仓库已有的 release tag 集合（分页）。
 3. 对每个「GitHub 有而 CNB 没有」的非草稿 release：
    下载其全部附件 -> 在 CNB 创建同名 release -> 依次上传附件（三步式）。
@@ -13,6 +14,7 @@
 环境变量：
     CNB_TOKEN   必填，CNB 访问令牌（云原生构建流水线自动注入）
     CNB_API_BASE 可选，默认 https://api.cnb.cool
+    GITHUB_TOKEN 可选，GitHub 访问令牌（镜像私有仓库 release 时必填）
 
 依赖：仅 Python 3.8+ 标准库，无需第三方包。
 """
@@ -100,15 +102,32 @@ def http_json(url, headers=None, method="GET", payload=None, retries=4, timeout=
     raise last_err
 
 
+class _NoAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """跟随 302 跳转时丢弃 Authorization 头。
+
+    私有仓库附件经 GitHub API 会 302 到 S3 签名 URL，签名本身包含完整
+    鉴权信息，若把原请求的 Authorization 头一并转发，可能导致签名校验
+    失败；同时也不应把 token 泄露到 api.github.com 之外的主机。
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+        new_req.headers.pop("Authorization", None)
+        return new_req
+
+
+_OPENER = urllib.request.build_opener(_NoAuthRedirectHandler())
+
+
 def download_file(url, dest, headers=None, retries=4, timeout=300):
-    """下载文件到 dest，失败重试。"""
+    """下载文件到 dest，失败重试。跟随重定向但不转发 Authorization。"""
     hdrs = dict(headers or {})
     hdrs.setdefault("User-Agent", USER_AGENT)
     last_err = None
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url, headers=hdrs)
-            with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as f:
+            with _OPENER.open(req, timeout=timeout) as resp, open(dest, "wb") as f:
                 shutil.copyfileobj(resp, f)
             return True
         except urllib.error.HTTPError as e:
@@ -464,7 +483,8 @@ def main():
     parser.add_argument("--cnb-repo", default=os.environ.get("CNB_REPO", ""),
                         help="CNB 目标仓库（格式 org/repo）")
     parser.add_argument("--github-token", default=os.environ.get("GITHUB_TOKEN", ""),
-                        help="GitHub Token（可选，公开仓库无需）")
+                        help="GitHub Token（公开仓库可选；私有仓库必填，"
+                             "token 需对该源仓库有读取权限）")
     parser.add_argument("--dry-run", action="store_true", help="仅对比版本，不下载不上传")
     parser.add_argument("--only-tags", default="",
                         help="只同步指定的 tag 集合（逗号分隔），由检查器规定；"
@@ -506,7 +526,19 @@ def main():
         sys.exit(2)
 
     print("== 1/4 获取 GitHub releases: %s" % args.github_repo)
-    gh_releases = gh_list_releases(args.github_repo, args.github_token)
+    try:
+        gh_releases = gh_list_releases(args.github_repo, args.github_token)
+    except ApiError as e:
+        if e.status == 404:
+            hint = ("仓库不存在或无权访问。若为私有仓库，请通过 --github-token "
+                    "或环境变量 GITHUB_TOKEN 提供有该仓库读取权限的 token。")
+        elif e.status == 401:
+            hint = "GitHub Token 无效或已过期。"
+        else:
+            hint = ""
+        print("[错误] 获取 GitHub releases 失败: %s%s" % (
+            e, ("；" + hint) if hint else ""), file=sys.stderr)
+        sys.exit(2)
     gh_tags = {r.get("tag_name") for r in gh_releases if r.get("tag_name")}
     print("   GitHub 共 %d 个 release" % len(gh_releases))
 
@@ -631,19 +663,30 @@ def main():
                             raise
 
                 # 3.1 下载全部附件
+                # 私有仓库的 browser_download_url 无法直接下载，需走
+                # GitHub API 的 asset 端点并带 Accept: application/octet-stream，
+                # 服务端会 302 到带签名的临时下载地址（公开仓库同样适用）。
                 assets = r.get("assets") or []
                 asset_files = []
                 rel_dir = os.path.join(workdir, tag.replace("/", "_"))
                 os.makedirs(rel_dir, exist_ok=True)
                 for a in assets:
                     a_name = a.get("name")
-                    a_url = a.get("browser_download_url")
-                    if not a_name or not a_url:
+                    if not a_name:
+                        continue
+                    if args.github_token and a.get("url"):
+                        a_url = a["url"]
+                        dl_headers = dict(_gh_headers(args.github_token),
+                                          Accept="application/octet-stream")
+                    else:
+                        a_url = a.get("browser_download_url")
+                        dl_headers = _gh_headers(args.github_token)
+                    if not a_url:
                         print("   跳过无下载地址的附件: %s" % a_name)
                         continue
                     dest = os.path.join(rel_dir, a_name)
                     print("   下载 %s (%d bytes)" % (a_name, a.get("size", 0)))
-                    download_file(a_url, dest, headers=_gh_headers(args.github_token))
+                    download_file(a_url, dest, headers=dl_headers)
                     asset_files.append(dest)
 
                 # 3.2 创建 CNB release
