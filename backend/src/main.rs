@@ -195,14 +195,15 @@ async fn handle_import_excel(State(db): State<db::Db>, mut mp: Multipart) -> imp
             // 临时文件不能固定命名为 .xlsx，否则二进制 .xls 会被 Xlsx（zip）
             // 读取器打开而报 "File not found 'xl/_rels/workbook.xml.rels'" 等错。
             // 这里按文件头魔数判断真实格式：OLE2(.xls) / zip(.xlsx)，扩展名兜底。
+            // 注意先取文件名：field.bytes() 会消耗 field。
+            let orig_name = field.file_name().unwrap_or("").to_string();
             let head = &data[..data.len().min(8)];
             let ext = if head.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) {
                 "xls"
             } else if head.starts_with(&[0x50, 0x4B]) {
                 "xlsx"
             } else {
-                let orig = field.file_name().unwrap_or("");
-                match std::path::Path::new(orig)
+                match std::path::Path::new(&orig_name)
                     .extension()
                     .map(|e| e.to_string_lossy().to_lowercase())
                     .as_deref()
