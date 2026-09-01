@@ -311,9 +311,6 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey[400]!),
-            ),
             child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
           Positioned(
@@ -384,9 +381,6 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Container(
                 width: _colWidths[i],
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey[300]!),
-                ),
                 child: Text(cellTexts[i]),
               ),
             ),
