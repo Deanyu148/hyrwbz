@@ -61,8 +61,8 @@ class _FilterScreenState extends State<FilterScreen> {
                 spacing: 12,
                 runSpacing: 8,
                 children: [
-                  _textField(_meeting, '会议号', width: 180),
-                  _textField(_taskNo, '任务号', width: 100, isNum: true),
+                  _textField(_meeting, '会议纪要号', width: 180),
+                  _textField(_taskNo, '任务序号', width: 100, isNum: true),
                   _textField(_dept, '责任部门', width: 180),
                   _textField(_owner, '责任人', width: 120),
                   _textField(_delayIndex, '延期次数>=', width: 100, isNum: true),
@@ -72,7 +72,7 @@ class _FilterScreenState extends State<FilterScreen> {
               DateRangeField(
                 initialFrom: _requiredFrom,
                 initialTo: _requiredTo,
-                label: '要求完成时间',
+                label: '计划完成时间',
                 onChanged: (f, t) { _requiredFrom = f; _requiredTo = t; },
               ),
               const SizedBox(height: 8),

@@ -93,3 +93,12 @@ pub struct ExportResult {
     pub path: String,
     pub sheets: Vec<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Attachment {
+    pub id: i64,
+    pub task_id: i64,
+    pub filename: String,
+    pub stored_name: String,
+    pub created_at: String,
+}

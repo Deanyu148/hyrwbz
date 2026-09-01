@@ -73,7 +73,7 @@ class _EditScreenState extends State<EditScreen> {
       if (_lock) {
         await Api.setLockedMeeting(_meeting.text.trim());
       } else {
-        // 如果当前锁定的就是这个会议号，主动解锁
+        // 如果当前锁定的就是这个会议纪要号，主动解锁
         final l = await Api.getLockedMeeting();
         if (l == _meeting.text.trim()) {
           await Api.setLockedMeeting('');
@@ -110,7 +110,7 @@ class _EditScreenState extends State<EditScreen> {
                     flex: 2,
                     child: TextField(
                       controller: _meeting,
-                      decoration: const InputDecoration(labelText: '会议号'),
+                      decoration: const InputDecoration(labelText: '会议纪要号'),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -118,7 +118,7 @@ class _EditScreenState extends State<EditScreen> {
                     child: TextField(
                       controller: _taskNo,
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: '任务号'),
+                      decoration: const InputDecoration(labelText: '任务序号'),
                     ),
                   ),
                 ],
@@ -143,11 +143,11 @@ class _EditScreenState extends State<EditScreen> {
                   Expanded(
                     child: TextField(
                       controller: _required,
-                      decoration: const InputDecoration(labelText: '要求完成时间'),
-                      onTap: () => _pick(_required, '要求完成时间'),
+                      decoration: const InputDecoration(labelText: '计划完成时间'),
+                      onTap: () => _pick(_required, '计划完成时间'),
                     ),
                   ),
-                  IconButton(icon: const Icon(Icons.calendar_month), onPressed: () => _pick(_required, '要求完成时间')),
+                  IconButton(icon: const Icon(Icons.calendar_month), onPressed: () => _pick(_required, '计划完成时间')),
                   const SizedBox(width: 12),
                   Expanded(
                     child: TextField(
@@ -162,15 +162,15 @@ class _EditScreenState extends State<EditScreen> {
               const SizedBox(height: 8),
               TextField(
                 controller: _remark,
-                decoration: const InputDecoration(labelText: '说明及备注'),
+                decoration: const InputDecoration(labelText: '备注'),
                 maxLines: 2,
               ),
               const SizedBox(height: 8),
               CheckboxListTile(
                 value: _lock,
                 onChanged: (v) => setState(() => _lock = v ?? false),
-                title: const Text('锁定当前会议号'),
-                subtitle: const Text('锁定后，下一次添加条目自动填入此会议号，直至主动取消'),
+                title: const Text('锁定当前会议纪要号'),
+                subtitle: const Text('锁定后，下一次添加条目自动填入此会议纪要号，直至主动取消'),
                 dense: true,
                 controlAffinity: ListTileControlAffinity.leading,
               ),

@@ -145,8 +145,8 @@ class _HomeScreenState extends State<HomeScreen> {
   String _buildSummary(FilterReq f) {
     if (f.isEmpty) return '';
     final p = <String>[];
-    if (f.meetingNo != null) p.add('会议号~${f.meetingNo}');
-    if (f.taskNo != null) p.add('任务号=${f.taskNo}');
+    if (f.meetingNo != null) p.add('会议纪要号~${f.meetingNo}');
+    if (f.taskNo != null) p.add('任务序号=${f.taskNo}');
     if (f.dept != null) p.add('部门~${f.dept}');
     if (f.owner != null) p.add('责任人~${f.owner}');
     if (f.requiredDateFrom != null || f.requiredDateTo != null) {
@@ -293,16 +293,16 @@ class _HomeScreenState extends State<HomeScreen> {
                             showCheckboxColumn: true,
                             columns: const [
                               DataColumn(label: Text('序号')),
-                              DataColumn(label: Text('会议号')),
-                              DataColumn(label: Text('任务号')),
+                              DataColumn(label: Text('会议纪要号')),
+                              DataColumn(label: Text('任务序号')),
                               DataColumn(label: Text('任务说明')),
                               DataColumn(label: Text('责任部门')),
                               DataColumn(label: Text('责任人')),
-                              DataColumn(label: Text('要求完成时间')),
+                              DataColumn(label: Text('计划完成时间')),
                               DataColumn(label: Text('实际完成时间')),
                               DataColumn(label: Text('最后延期')),
                               DataColumn(label: Text('延期理由')),
-                              DataColumn(label: Text('说明及备注')),
+                              DataColumn(label: Text('备注')),
                             ],
                             rows: _tasks.asMap().entries.map((e) {
                               final i = e.key;
@@ -399,7 +399,7 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
 
   Future<void> _save() async {
     if (_meeting.text.isEmpty) {
-      _toast('会议号不能为空');
+      _toast('会议纪要号不能为空');
       return;
     }
     setState(() => _saving = true);
@@ -453,13 +453,13 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
                     children: [
                       const Icon(Icons.lock, size: 16),
                       const SizedBox(width: 6),
-                      Expanded(child: Text('会议号已自动填入（锁定：$_lockedMeeting）')),
+                      Expanded(child: Text('会议纪要号已自动填入（锁定：$_lockedMeeting）')),
                     ],
                   ),
                 ),
               TextField(
                 controller: _meeting,
-                decoration: const InputDecoration(labelText: '会议号 *'),
+                decoration: const InputDecoration(labelText: '会议纪要号 *'),
                 enabled: _lockedMeeting == null || _lockedMeeting!.isEmpty,
               ),
               const SizedBox(height: 8),
@@ -478,11 +478,11 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
                   Expanded(
                     child: TextField(
                       controller: _required,
-                      decoration: const InputDecoration(labelText: '要求完成时间'),
-                      onTap: () => _pick(_required, '要求完成时间'),
+                      decoration: const InputDecoration(labelText: '计划完成时间'),
+                      onTap: () => _pick(_required, '计划完成时间'),
                     ),
                   ),
-                  IconButton(icon: const Icon(Icons.calendar_month), onPressed: () => _pick(_required, '要求完成时间')),
+                  IconButton(icon: const Icon(Icons.calendar_month), onPressed: () => _pick(_required, '计划完成时间')),
                   const SizedBox(width: 12),
                   Expanded(
                     child: TextField(
@@ -495,7 +495,7 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
                 ],
               ),
               const SizedBox(height: 8),
-              TextField(controller: _remark, decoration: const InputDecoration(labelText: '说明及备注'), maxLines: 2),
+              TextField(controller: _remark, decoration: const InputDecoration(labelText: '备注'), maxLines: 2),
             ],
           ),
         ),
@@ -524,14 +524,14 @@ class _ViewTaskDialog extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _row('会议号', task.meetingNo),
-              _row('任务号', task.taskNo.toString()),
+              _row('会议纪要号', task.meetingNo),
+              _row('任务序号', task.taskNo.toString()),
               _row('任务说明', task.taskDesc),
               _row('责任部门', task.dept),
               _row('责任人', task.owner),
-              _row('要求完成时间', task.requiredDate),
+              _row('计划完成时间', task.requiredDate),
               _row('实际完成时间', task.actualDate),
-              _row('说明及备注', task.remark),
+              _row('备注', task.remark),
               const Divider(height: 24),
               Text('延期记录（共 ${task.delays.length} 条）',
                   style: const TextStyle(fontWeight: FontWeight.bold)),

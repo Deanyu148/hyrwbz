@@ -41,3 +41,14 @@ CREATE TABLE IF NOT EXISTS snapshots (
     payload     TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_saved_at ON snapshots(saved_at);
+
+-- 附件表
+CREATE TABLE IF NOT EXISTS attachments (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id      INTEGER NOT NULL,
+    filename     TEXT    NOT NULL,
+    stored_name  TEXT    NOT NULL,
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_task_id ON attachments(task_id);

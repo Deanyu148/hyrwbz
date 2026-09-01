@@ -78,8 +78,8 @@ fn write_sheet(
     let max_delays = tasks.iter().map(|t| t.delays.len()).max().unwrap_or(0);
     // 基础表头
     let base_headers = [
-        "序号", "会议号", "任务号", "任务说明", "责任部门", "责任人",
-        "要求完成时间", "实际完成时间",
+        "序号", "会议纪要号", "任务序号", "任务说明", "责任部门", "责任人",
+        "计划完成时间", "实际完成时间",
     ];
     // 写基础表头
     for (c, h) in base_headers.iter().enumerate() {
@@ -93,9 +93,9 @@ fn write_sheet(
         sheet.write_with_format(0, col, format!("理由{}", d + 1), title_fmt)?;
         col += 1;
     }
-    // 最后是说明及备注
+    // 最后是备注
     let remark_col = col;
-    sheet.write_with_format(0, remark_col, "说明及备注", title_fmt)?;
+    sheet.write_with_format(0, remark_col, "备注", title_fmt)?;
 
     // 写数据
     for (i, t) in tasks.iter().enumerate() {

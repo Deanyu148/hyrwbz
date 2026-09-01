@@ -245,3 +245,31 @@ pub async fn set_locked(State(db): State<Db>, Json(req): Json<SetLockedMeetingRe
         .bind(&v).execute(&db).await.map_err(internal)?;
     Ok(Json(json!({"ok": true})))
 }
+
+pub async fn list_attachments(State(db): State<Db>, Path(id): Path<i64>) -> Result<Json<Vec<crate::models::Attachment>>, ApiError> {
+    let rows = sqlx::query("SELECT * FROM attachments WHERE task_id = ?1 ORDER BY id")
+        .bind(id).fetch_all(&db).await.map_err(internal)?;
+    let v: Vec<crate::models::Attachment> = rows.iter().map(|r| crate::models::Attachment {
+        id: r.try_get("id").unwrap_or_default(),
+        task_id: r.try_get("task_id").unwrap_or_default(),
+        filename: r.try_get("filename").unwrap_or_default(),
+        stored_name: r.try_get("stored_name").unwrap_or_default(),
+        created_at: r.try_get("created_at").unwrap_or_default(),
+    }).collect();
+    Ok(Json(v))
+}
+
+pub async fn delete_attachment(State(db): State<Db>, Path(id): Path<i64>) -> Result<Json<serde_json::Value>, ApiError> {
+    // 先查 stored_name 删除文件
+    let row = sqlx::query("SELECT stored_name FROM attachments WHERE id = ?1").bind(id)
+        .fetch_optional(&db).await.map_err(internal)?;
+    if let Some(r) = row {
+        let stored: String = r.try_get("stored_name").unwrap_or_default();
+        let exe = std::env::current_exe().unwrap_or_default();
+        let dir = exe.parent().unwrap_or(std::path::Path::new("."));
+        let fpath = dir.join("attachments").join(&stored);
+        std::fs::remove_file(&fpath).ok();
+    }
+    sqlx::query("DELETE FROM attachments WHERE id = ?1").bind(id).execute(&db).await.map_err(internal)?;
+    Ok(Json(json!({"ok": true})))
+}
