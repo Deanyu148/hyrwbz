@@ -9,6 +9,7 @@ on:
       - '.github/workflows/**'
       - 'README.md'
       - 'readme.md'
+      - '.gitignore'
   workflow_dispatch:
     inputs:
       is_pre_release:
