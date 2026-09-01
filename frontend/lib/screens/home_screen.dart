@@ -225,12 +225,13 @@ class _HomeScreenState extends State<HomeScreen> {
             child: const Text('取消导入'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('否，保留备注'),
-          ),
-          FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('是，移动'),
+          ),
+          FilledButton(
+            autofocus: true,
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('否，保留备注'),
           ),
         ],
       ),
