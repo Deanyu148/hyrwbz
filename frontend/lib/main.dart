@@ -1,4 +1,4 @@
-import 'dart:io' show File, Platform, Process, ProcessStartMode, Directory, InternetAddress, RawDatagramSocket;
+import 'dart:io' show File, Platform, Process, ProcessStartMode, Directory, InternetAddress, RawDatagramSocket, pid;
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -16,6 +16,8 @@ Future<void> main() async {
     await windowManager.ensureInitialized();
     await windowManager.setTitle('会议任务管理跟踪系统');
     await windowManager.setMinimumSize(const Size(900, 600));
+    // 拦截窗口关闭，保证 onWindowClose 有机会保存窗口状态并清理后端进程
+    await windowManager.setPreventClose(true);
     // Restore saved window size and position
     final prefs = await SharedPreferences.getInstance();
     final w = prefs.getDouble('window_width');
@@ -47,7 +49,7 @@ Future<void> _startBackend() async {
   try {
     _backendProcess = await Process.start(
       exe,
-      <String>['--port', port.toString()],
+      <String>['--port', port.toString(), '--parent-pid', pid.toString()],
       mode: mode,
     );
   } catch (_) {}
@@ -80,7 +82,13 @@ String? _resolveBackendExe() {
 
 Future<void> _killBackend() async {
   try {
-    _backendProcess.kill();
+    if (Platform.isWindows) {
+      // detached 进程用 taskkill 连同子进程一起强制结束，比 Process.kill 可靠
+      await Process.run(
+          'taskkill', <String>['/PID', _backendProcess.pid.toString(), '/T', '/F']);
+    } else {
+      _backendProcess.kill();
+    }
   } catch (_) {}
 }
 

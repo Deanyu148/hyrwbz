@@ -20,19 +20,64 @@ use serde_json::json;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
 
-/// 解析 --port 参数，默认 7790
-fn parse_port() -> u16 {
+/// 解析 --port（默认 7790）与 --parent-pid（父进程 pid，用于看门狗）参数
+fn parse_args() -> (u16, u32) {
     let mut args = std::env::args().skip(1);
+    let mut port = 7790u16;
+    let mut parent_pid = 0u32;
     while let Some(a) = args.next() {
-        if a == "--port" {
-            if let Some(v) = args.next() {
-                if let Ok(p) = v.parse::<u16>() {
-                    return p;
+        match a.as_str() {
+            "--port" => {
+                if let Some(v) = args.next() {
+                    if let Ok(p) = v.parse::<u16>() {
+                        port = p;
+                    }
                 }
             }
+            "--parent-pid" => {
+                if let Some(v) = args.next() {
+                    if let Ok(p) = v.parse::<u32>() {
+                        parent_pid = p;
+                    }
+                }
+            }
+            _ => {}
         }
     }
-    7790
+    (port, parent_pid)
+}
+
+/// 父进程存活检测：Windows 用 OpenProcess 查询；类 Unix 检查 /proc/<pid>。
+#[cfg(windows)]
+fn parent_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess};
+    // PROCESS_QUERY_LIMITED_INFORMATION
+    let handle = unsafe { OpenProcess(0x1000, 0, pid) };
+    if handle.is_null() {
+        return false;
+    }
+    let mut code: u32 = 0;
+    let ok = unsafe { GetExitCodeProcess(handle, &mut code) };
+    unsafe { CloseHandle(handle) };
+    ok != 0 && code == 259 // STILL_ACTIVE
+}
+
+#[cfg(not(windows))]
+fn parent_alive(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{}", pid)).exists()
+}
+
+/// 看门狗：父进程（前端）退出后自动结束本进程。
+/// 前端以 detached 模式启动后端，操作系统不会在前端退出时连带清理，
+/// 前端自身的 kill 也可能因崩溃等原因未执行，靠此兜底防止后端残留。
+async fn parent_watchdog(parent_pid: u32) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        if !parent_alive(parent_pid) {
+            std::process::exit(0);
+        }
+    }
 }
 
 #[tokio::main]
@@ -41,7 +86,10 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(debug_assertions)]
     tracing_subscriber::fmt().with_env_filter("info").init();
 
-    let port = parse_port();
+    let (port, parent_pid) = parse_args();
+    if parent_pid > 0 {
+        tokio::spawn(parent_watchdog(parent_pid));
+    }
     let db_path = db::default_db_path();
     let pool = db::init(&db_path).await?;
 
