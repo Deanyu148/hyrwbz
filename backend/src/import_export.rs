@@ -120,7 +120,7 @@ pub async fn import_excel(db: &Db, file_path: &str) -> Result<ImportResult> {
     let col_remark = find_col("备注");
 
     let mut imported = 0;
-    let mut errors: Vec<String> = Vec::new();
+    let errors: Vec<String> = Vec::new();
 
     for row in rows.iter().skip(1) {
         let get_str = |col: Option<usize>| -> String {
@@ -192,13 +192,7 @@ fn cell_to_string(cell: &Data) -> String {
         Data::String(s) => s.clone(),
         Data::Int(i) => i.to_string(),
         Data::Float(f) => f.to_string(),
-        Data::DateTime(d) => {
-            if let Some(dt) = d.as_datetime() {
-                dt.format("%Y/%m/%d").to_string()
-            } else {
-                d.to_string()
-            }
-        }
+        Data::DateTime(d) => d.to_string(),
         _ => String::new(),
     }
 }
