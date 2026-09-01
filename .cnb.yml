@@ -1,13 +1,9 @@
 # CNB 流水线
 #
-# 包含三条流水线：
-#   1. build-windows-release：编译 Windows 安装包 + 自动打 Tag + 发布 Release
-#      触发：网页按钮「构建 Windows 安装包」
-#      运行：自托管 Windows 构建机（runner.namespace: group + tags: [windows, x64]）
-#   2. mirror-to-github：把代码镜像推送到 GitHub
+#   1. mirror-to-github：把代码镜像推送到 GitHub
 #      触发：push 到 main / 网页按钮「同步到 GitHub」
 #      运行：Linux 官方构建机
-#   3. fetch-gha-logs：拉取 GitHub Actions 最新构建的失败日志
+#   2. fetch-gha-logs：拉取 GitHub Actions 最新构建的失败日志
 #      触发：网页按钮「查看 GitHub Actions 日志」
 #      运行：Linux 官方构建机
 #
@@ -15,78 +11,8 @@
 # GITHUB_TOKEN 通过 imports 从密钥仓库 asudad/secret 引入
 # 密钥文件：https://cnb.cool/asudad/secret/-/blob/main/GHT.yml
 
-# ── 1. 构建 Windows 安装包 ──────────────────────────────
-$:
-  web_trigger_build:
-    - name: build-windows-release
-      runner:
-        namespace: group
-        tags:
-          - windows
-          - x64
-      env:
-        APP_VERSION: "0.1.0"
-        IS_PRE_RELEASE: "false"
-      stages:
-        - name: show-env
-          script: |
-            Write-Host "Branch: $Env:CNB_BRANCH"
-            Write-Host "Commit: $Env:CNB_COMMIT_SHORT"
-            Write-Host "AppVersion: $Env:APP_VERSION"
-            Write-Host "PreRelease: $Env:IS_PRE_RELEASE"
-            rustc --version
-            cargo --version
-            flutter --version | Select-Object -First 2
-        - name: build-backend
-          script: |
-            Set-Location backend
-            cargo build --release
-            if (-not (Test-Path "target\release\hyrwbz_backend.exe")) { throw "后端编译失败" }
-        - name: build-frontend
-          script: |
-            Set-Location frontend
-            flutter create --platforms=windows --project-name=hyrwbz_frontend --overwrite .
-            git checkout -- lib/ pubspec.yaml
-            flutter pub get
-            flutter build windows --release
-            if (-not (Test-Path "build\windows\x64\runner\Release")) { throw "前端编译失败" }
-        - name: stage-installer
-          script: |
-            $dist = "installer\dist"
-            New-Item -ItemType Directory -Force -Path "$dist\frontend" | Out-Null
-            Copy-Item -Recurse -Force "frontend\build\windows\x64\runner\Release\*" "$dist\frontend\"
-            Copy-Item -Force "backend\target\release\hyrwbz_backend.exe" "$dist\"
-        - name: build-installer
-          script: |
-            $root = $Env:CNB_BUILD_WORKSPACE
-            $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-            $issPath = Join-Path $root "installer\hyrwbz.iss"
-            Write-Host "ISCC: $isccPath"
-            Write-Host "ISS:  $issPath"
-            Write-Host "Exists: $(Test-Path $issPath)"
-            if (-not (Test-Path $issPath)) { throw "找不到 .iss 文件: $issPath" }
-            Set-Location $root
-            & $isccPath $issPath
-            Get-ChildItem (Join-Path $root "build\installer") -Filter *.exe | Format-List FullName
-        - name: compute-tag
-          script: |
-            $ver = $Env:APP_VERSION
-            $tag = "v$ver-$Env:CNB_COMMIT_SHORT"
-            Write-Host "Tag = $tag"
-            echo "##[set-output TAG=$tag]"
-          exports:
-            TAG: TAG
-        - name: create-release
-          type: git:release
-          options:
-            tag: $TAG
-            description: |
-              会议任务管理跟踪系统 (HYRWBZ) Windows 安装包
-              - 版本: $TAG
-              - 兼容: Windows 10 / Windows 11
-              - 构建: $Env:CNB_COMMIT_SHORT
-              - 安装: 解压后运行安装包 .exe 即可
 
+$:
   # 网页按钮「同步到 GitHub」
   web_trigger_sync_github:
     - name: sync-to-github
@@ -225,3 +151,4 @@ main:
             git remote remove github 2>/dev/null || true
             git remote add github "https://x-access-token:$GITHUB_TOKEN@github.com/Deanyu148/hyrwbz.git"
             git push --force github "refs/heads/$CNB_BRANCH:refs/heads/$CNB_BRANCH"
+            
