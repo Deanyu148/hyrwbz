@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../input_formatters.dart';
 import '../models.dart';
 import 'date_picker_dialog.dart';
 
@@ -73,8 +74,18 @@ class _FilterScreenState extends State<FilterScreen> {
                 children: [
                   _textField(_meeting, '会议纪要号', width: 180),
                   _textField(_taskNo, '任务序号', width: 100, isNum: true),
-                  _textField(_dept, '责任部门(逗号分隔)', width: 220),
-                  _textField(_owner, '责任人(逗号分隔)', width: 180),
+                  _textField(
+                    _dept,
+                    '责任部门(逗号分隔)',
+                    width: 220,
+                    normalizeCommas: true,
+                  ),
+                  _textField(
+                    _owner,
+                    '责任人(逗号分隔)',
+                    width: 180,
+                    normalizeCommas: true,
+                  ),
                   _textField(_delayIndex, '延期次数>=', width: 100, isNum: true),
                   SizedBox(
                     width: 150,
@@ -140,8 +151,12 @@ class _FilterScreenState extends State<FilterScreen> {
             final f = FilterReq(
               meetingNo: _meeting.text.isEmpty ? null : _meeting.text,
               taskNo: tn,
-              dept: _dept.text.isEmpty ? null : _dept.text,
-              owner: _owner.text.isEmpty ? null : _owner.text,
+              dept: _dept.text.isEmpty
+                  ? null
+                  : normalizeEnglishCommas(_dept.text),
+              owner: _owner.text.isEmpty
+                  ? null
+                  : normalizeEnglishCommas(_owner.text),
               requiredDateFrom: _requiredFrom,
               requiredDateTo: _requiredTo,
               actualDateFrom: _actualFrom,
@@ -161,13 +176,21 @@ class _FilterScreenState extends State<FilterScreen> {
     );
   }
 
-  Widget _textField(TextEditingController c, String label,
-      {double width = 150, bool isNum = false}) {
+  Widget _textField(
+    TextEditingController c,
+    String label, {
+    double width = 150,
+    bool isNum = false,
+    bool normalizeCommas = false,
+  }) {
     return SizedBox(
       width: width,
       child: TextField(
         controller: c,
         keyboardType: isNum ? TextInputType.number : TextInputType.text,
+        inputFormatters: normalizeCommas
+            ? const [EnglishCommaTextInputFormatter()]
+            : null,
         decoration: InputDecoration(labelText: label, isDense: true),
       ),
     );

@@ -2,6 +2,7 @@ import 'dart:io' show File;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../api.dart';
+import '../input_formatters.dart';
 import '../models.dart';
 import 'date_picker_dialog.dart';
 
@@ -137,8 +138,8 @@ class _EditScreenState extends State<EditScreen> {
         meetingNo: _meeting.text.trim(),
         taskNo: int.tryParse(_taskNo.text) ?? 1,
         taskDesc: _taskDesc.text,
-        dept: _dept.text,
-        owner: _owner.text,
+        dept: normalizeEnglishCommas(_dept.text),
+        owner: normalizeEnglishCommas(_owner.text),
         requiredDate: _required.text,
         actualDate: _actual.text,
         remark: _remark.text,
@@ -209,9 +210,21 @@ class _EditScreenState extends State<EditScreen> {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Expanded(child: TextField(controller: _dept, decoration: const InputDecoration(labelText: '责任部门'))),
+                  Expanded(
+                    child: TextField(
+                      controller: _dept,
+                      inputFormatters: const [EnglishCommaTextInputFormatter()],
+                      decoration: const InputDecoration(labelText: '责任部门'),
+                    ),
+                  ),
                   const SizedBox(width: 12),
-                  Expanded(child: TextField(controller: _owner, decoration: const InputDecoration(labelText: '责任人'))),
+                  Expanded(
+                    child: TextField(
+                      controller: _owner,
+                      inputFormatters: const [EnglishCommaTextInputFormatter()],
+                      decoration: const InputDecoration(labelText: '责任人'),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
