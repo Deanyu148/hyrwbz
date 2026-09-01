@@ -6,8 +6,10 @@ import 'package:file_picker/file_picker.dart';
 import '../api.dart';
 import '../input_formatters.dart';
 import '../models.dart';
+import '../notifications.dart';
 import '../table_layout.dart';
 import '../table_layout_store.dart';
+import '../task_sort.dart';
 import 'edit_screen.dart';
 import 'delay_screen.dart';
 import 'filter_screen.dart';
@@ -33,6 +35,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<double>? _columnWidths;
   List<double>? _savedColumnWidths;
   double? _tableAvailableWidth;
+  TaskSortColumn _sortColumn = TaskSortColumn.meetingNo;
+  bool _sortAscending = true;
 
   @override
   void initState() {
@@ -67,7 +71,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _reload() async {
     setState(() => _loading = true);
     try {
-      _tasks = await Api.listTasks(_filter);
+      final tasks = await Api.listTasks(_filter);
+      _tasks = sortTasks(
+        tasks,
+        column: _sortColumn,
+        ascending: _sortAscending,
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('加载失败: $e')));
@@ -186,6 +195,39 @@ class _HomeScreenState extends State<HomeScreen> {
     await showDialog<void>(
       context: context,
       builder: (_) => _ViewTaskDialog(task: t),
+    );
+  }
+
+  Future<void> _openNotificationTask(int taskId) async {
+    Task? task;
+    for (final value in _tasks) {
+      if (value.id == taskId) {
+        task = value;
+        break;
+      }
+    }
+    if (task == null) {
+      try {
+        final tasks = await Api.listTasks(null);
+        for (final value in tasks) {
+          if (value.id == taskId) {
+            task = value;
+            break;
+          }
+        }
+      } catch (error) {
+        if (mounted) _toast('加载通知对应条目失败: $error');
+        return;
+      }
+    }
+    if (task != null && mounted) await _viewTask(task!);
+  }
+
+  Future<void> _openNotificationScreen() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => NotificationScreen(onOpenTask: _openNotificationTask),
+      ),
     );
   }
 
@@ -415,6 +457,39 @@ class _HomeScreenState extends State<HomeScreen> {
     if (widths != null) TaskColumnWidthStore.saveSync(widths);
   }
 
+  void _sortByTableIndex(int index) {
+    final column = taskSortColumnForIndex(index);
+    if (column == null) return;
+    setState(() {
+      if (_sortColumn == column) {
+        _sortAscending = !_sortAscending;
+      } else {
+        _sortColumn = column;
+        _sortAscending = true;
+      }
+      _tasks = sortTasks(
+        _tasks,
+        column: _sortColumn,
+        ascending: _sortAscending,
+      );
+    });
+  }
+
+  Icon _sortIcon(int index) {
+    final column = taskSortColumnForIndex(index);
+    if (column == null) {
+      return Icon(Icons.unfold_more, size: 16, color: Colors.grey.shade300);
+    }
+    final active = _sortColumn == column;
+    return Icon(
+      active
+          ? (_sortAscending ? Icons.arrow_upward : Icons.arrow_downward)
+          : Icons.unfold_more,
+      size: 16,
+      color: active ? Theme.of(context).colorScheme.primary : Colors.grey,
+    );
+  }
+
   Widget _buildHeaderRow(List<double> widths) {
     return Container(
       color: Colors.grey[200],
@@ -444,23 +519,35 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildHeaderCell(double width, String label, int index) {
+    final sortable = taskSortColumnForIndex(index) != null;
     return SizedBox(
       width: width,
       child: Stack(
         children: [
-          Container(
-            decoration: BoxDecoration(
-              border: Border(
-                right: BorderSide(color: Colors.grey.shade300),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: sortable ? () => _sortByTableIndex(index) : null,
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border(
+                  right: BorderSide(color: Colors.grey.shade300),
+                ),
               ),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
-            alignment: Alignment.centerLeft,
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.bold),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+              alignment: Alignment.centerLeft,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  _sortIcon(index),
+                ],
+              ),
             ),
           ),
           if (index < _columnLabels.length - 1)
@@ -588,6 +675,10 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('会议任务管理跟踪系统'),
         actions: [
+          NotificationButton(
+            onOpenScreen: _openNotificationScreen,
+            onOpenTask: _openNotificationTask,
+          ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _reload, tooltip: '刷新'),
           IconButton(icon: const Icon(Icons.filter_alt), onPressed: _openFilter, tooltip: '统计筛选'),
           IconButton(icon: const Icon(Icons.history), onPressed: _saveSnapshot, tooltip: '保存历史快照'),

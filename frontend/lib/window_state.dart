@@ -70,21 +70,23 @@ class WindowStateStore {
     } catch (_) {}
   }
 
-  static Future<void> restore() async {
+  /// 在窗口尚未显示时恢复普通窗口范围，并返回保存的状态。
+  /// 最大化由启动时序在 setBounds 完成后统一执行，避免窗口显示后再切换状态造成闪烁。
+  static Future<SavedWindowState?> restore() async {
     final saved = load();
-    if (saved == null) return;
+    if (saved == null) return null;
     try {
       final displays = await screenRetriever.getAllDisplays();
       final primary = await screenRetriever.getPrimaryDisplay();
       final bounds = correctedBounds(saved, displays, primary);
       await windowManager.setBounds(bounds);
-      if (saved.maximized) await windowManager.maximize();
     } catch (_) {
       await windowManager.setSize(Size(
         saved.width < minimumSize.width ? minimumSize.width : saved.width,
         saved.height < minimumSize.height ? minimumSize.height : saved.height,
       ));
     }
+    return saved;
   }
 
   static Rect correctedBounds(
@@ -133,10 +135,17 @@ class WindowLifecycleListener with WindowListener {
 
   WindowLifecycleListener({required this.onClose});
 
-  Future<void> initialize() async {
+  Future<void> initialize({SavedWindowState? restoredState}) async {
+    if (restoredState != null) {
+      // 最大化窗口启动时，原生窗口可能要到 show 后才报告 maximized。
+      // 直接采用已保存状态，避免初始化阶段把 maximized 错写为 false。
+      _normalState = restoredState;
+      _maximized = restoredState.maximized;
+      if (!_maximized) await _captureNormalState();
+      return;
+    }
     _maximized = await windowManager.isMaximized();
     if (_maximized) {
-      // 启动时若恢复为最大化，保存文件中的 bounds 仍是上次的普通窗口范围。
       _normalState = WindowStateStore.load();
     } else {
       await _captureNormalState();
@@ -155,12 +164,21 @@ class WindowLifecycleListener with WindowListener {
 
   @override
   void onWindowMaximize() {
+    _saveTimer?.cancel();
     _maximized = true;
     _saveCurrent();
   }
 
   @override
   void onWindowUnmaximize() {
+    // Windows 关闭最大化窗口时可能短暂发出 unmaximize；稍后确认，
+    // 防止关闭过程把已保存的最大化状态覆盖为普通窗口。
+    unawaited(_confirmUnmaximize());
+  }
+
+  Future<void> _confirmUnmaximize() async {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    if (_closing || await windowManager.isMaximized()) return;
     _maximized = false;
     _scheduleCapture();
   }

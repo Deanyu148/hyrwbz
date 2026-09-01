@@ -14,12 +14,43 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     await windowManager.ensureInitialized();
-    await windowManager.setTitle('会议任务管理跟踪系统');
-    await windowManager.setMinimumSize(WindowStateStore.minimumSize);
-    await WindowStateStore.restore();
-    windowLifecycle = WindowLifecycleListener(onClose: backendManager.close);
-    windowManager.addListener(windowLifecycle);
-    await windowLifecycle.initialize();
+    final windowOptions = WindowOptions(
+      size: WindowStateStore.minimumSize,
+      minimumSize: WindowStateStore.minimumSize,
+      center: true,
+      title: '会议任务管理跟踪系统',
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+    );
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
+      SavedWindowState? saved;
+      var listenerCreated = false;
+      try {
+        // 窗口保持隐藏，先恢复普通窗口范围，再恢复最大化状态。
+        saved = await WindowStateStore.restore();
+        if (saved?.maximized == true) {
+          await windowManager.maximize();
+        }
+        windowLifecycle = WindowLifecycleListener(onClose: backendManager.close);
+        windowManager.addListener(windowLifecycle);
+        listenerCreated = true;
+        await windowLifecycle.initialize(restoredState: saved);
+      } catch (_) {
+        // 即使恢复状态失败，也要继续显示窗口，避免应用无界面启动。
+        if (!listenerCreated) {
+          windowLifecycle = WindowLifecycleListener(onClose: backendManager.close);
+          windowManager.addListener(windowLifecycle);
+        }
+      } finally {
+        await windowManager.show();
+        // 少数 Windows 环境对隐藏窗口的 maximize 延迟生效；显示后只在
+        // 状态仍未生效时补做一次，保证最终一定以最大化打开。
+        if (saved?.maximized == true && !await windowManager.isMaximized()) {
+          await windowManager.maximize();
+        }
+        await windowManager.focus();
+      }
+    });
   }
   Api.configure(backendManager.getClient);
   runApp(const HyrwbzApp());

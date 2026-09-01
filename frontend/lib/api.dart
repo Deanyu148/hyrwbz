@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'local_rpc.dart';
 import 'models.dart';
+import 'notification_model.dart';
 
 class AttachmentDownload {
   final String filename;
@@ -89,6 +90,23 @@ class Api {
 
   static Future<void> setLockedMeeting(String? meetingNo) async {
     await _call('meeting_lock.set', params: {'meeting_no': meetingNo ?? ''});
+  }
+
+  static Future<List<NotificationItem>> listNotifications() async {
+    final reply = await _call('notification.list');
+    return (reply.result as List)
+        .map((value) => NotificationItem.fromJson(
+              Map<String, dynamic>.from(value as Map),
+            ))
+        .toList();
+  }
+
+  static Future<void> markNotificationRead(int id) async {
+    await _call('notification.mark_read', params: {'id': id});
+  }
+
+  static Future<void> markAllNotificationsRead() async {
+    await _call('notification.mark_all_read');
   }
 
   static Future<Map<String, dynamic>> exportExcel(FilterReq? filter, String? outDir) async {

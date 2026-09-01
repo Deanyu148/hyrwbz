@@ -1,6 +1,6 @@
 use crate::db::Db;
 use crate::models::{CreateDelayReq, FilterReq, SetLockedMeetingReq, UpdateTaskReq};
-use crate::{excel, import_export, service};
+use crate::{excel, import_export, notifications, service};
 use interprocess::local_socket::tokio::Stream;
 use interprocess::local_socket::traits::tokio::Listener as _;
 use interprocess::local_socket::{GenericFilePath, ListenerOptions, ToFsName};
@@ -73,14 +73,19 @@ struct UpdateAttachmentParam {
     filename: String,
 }
 
-pub async fn serve(socket_path: &str, db: Db) -> anyhow::Result<()> {
+pub async fn serve(
+    socket_path: &str,
+    db: Db,
+    notification_store: notifications::NotificationStore,
+) -> anyhow::Result<()> {
     let name = socket_path.to_fs_name::<GenericFilePath>()?;
     let listener = ListenerOptions::new().name(name).create_tokio()?;
     loop {
         let stream = listener.accept().await?;
         let db = db.clone();
+        let notification_store = notification_store.clone();
         tokio::spawn(async move {
-            if let Err(_error) = handle_connection(stream, db).await {
+            if let Err(_error) = handle_connection(stream, db, notification_store).await {
                 #[cfg(debug_assertions)]
                 tracing::warn!("local RPC connection closed: {}", _error);
             }
@@ -88,7 +93,11 @@ pub async fn serve(socket_path: &str, db: Db) -> anyhow::Result<()> {
     }
 }
 
-async fn handle_connection(stream: Stream, db: Db) -> anyhow::Result<()> {
+async fn handle_connection(
+    stream: Stream,
+    db: Db,
+    notification_store: notifications::NotificationStore,
+) -> anyhow::Result<()> {
     let (mut reader, mut writer) = tokio::io::split(stream);
     loop {
         let frame = match read_frame(&mut reader).await {
@@ -97,7 +106,13 @@ async fn handle_connection(stream: Stream, db: Db) -> anyhow::Result<()> {
             Err(error) => return Err(error.into()),
         };
         let response = match serde_json::from_value::<RequestHeader>(frame.header) {
-            Ok(request) => dispatch(&db, request, frame.binary).await,
+            Ok(request) => dispatch_with_notifications(
+                &db,
+                &notification_store,
+                request,
+                frame.binary,
+            )
+            .await,
             Err(error) => error_frame(0, "protocol", format!("invalid request header: {error}")),
         };
         write_frame(&mut writer, &response).await?;
@@ -105,6 +120,24 @@ async fn handle_connection(stream: Stream, db: Db) -> anyhow::Result<()> {
 }
 
 async fn dispatch(db: &Db, request: RequestHeader, binary: Vec<u8>) -> Frame {
+    dispatch_inner(db, None, request, binary).await
+}
+
+async fn dispatch_with_notifications(
+    db: &Db,
+    notification_store: &notifications::NotificationStore,
+    request: RequestHeader,
+    binary: Vec<u8>,
+) -> Frame {
+    dispatch_inner(db, Some(notification_store), request, binary).await
+}
+
+async fn dispatch_inner(
+    db: &Db,
+    notification_store: Option<&notifications::NotificationStore>,
+    request: RequestHeader,
+    binary: Vec<u8>,
+) -> Frame {
     let id = request.id;
     let result: Result<(Value, Vec<u8>), service::ServiceError> = async {
         let value = match request.method.as_str() {
@@ -124,6 +157,20 @@ async fn dispatch(db: &Db, request: RequestHeader, binary: Vec<u8>) -> Frame {
             "delay.delete" => service::delete_delay(db, decode::<IdParam>(request.params)?.id).await?,
             "meeting_lock.get" => serde_json::to_value(service::get_locked(db).await?).map_err(service::ServiceError::internal)?,
             "meeting_lock.set" => service::set_locked(db, decode::<SetLockedMeetingReq>(request.params)?).await?,
+            "notification.list" => {
+                let store = notification_store.ok_or_else(|| service::ServiceError::internal("notification service unavailable"))?;
+                serde_json::to_value(store.list(db).await.map_err(service::ServiceError::internal)?).map_err(service::ServiceError::internal)?
+            }
+            "notification.mark_read" => {
+                let store = notification_store.ok_or_else(|| service::ServiceError::internal("notification service unavailable"))?;
+                store.mark_read(decode::<IdParam>(request.params)?.id).await.map_err(service::ServiceError::internal)?;
+                json!({"ok": true})
+            }
+            "notification.mark_all_read" => {
+                let store = notification_store.ok_or_else(|| service::ServiceError::internal("notification service unavailable"))?;
+                store.mark_all_read().await.map_err(service::ServiceError::internal)?;
+                json!({"ok": true})
+            }
             "snapshot.create" => json!({"snapshot_id": import_export::create_snapshot(db).await.map_err(service::ServiceError::internal)?}),
             "snapshot.list" => serde_json::to_value(import_export::list_snapshots(db).await.map_err(service::ServiceError::internal)?).map_err(service::ServiceError::internal)?,
             "export.excel" => {
@@ -435,7 +482,8 @@ mod tests {
             .await
             .unwrap();
         let server_path = socket_path.clone();
-        let server = tokio::spawn(async move { serve(&server_path, db).await });
+        let notification_store = notifications::NotificationStore::open().await.unwrap();
+        let server = tokio::spawn(async move { serve(&server_path, db, notification_store).await });
 
         let mut client = None;
         for _ in 0..50 {

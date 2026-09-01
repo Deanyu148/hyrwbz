@@ -36,4 +36,20 @@ void main() {
     expect(bounds.width, 900);
     expect(bounds.height, 600);
   });
+
+  test('maximized state survives JSON persistence', () {
+    const saved = SavedWindowState(
+      x: 120,
+      y: 80,
+      width: 1280,
+      height: 720,
+      maximized: true,
+    );
+    final restored = SavedWindowState.fromJson(saved.toJson());
+    expect(restored.maximized, isTrue);
+    expect(restored.x, saved.x);
+    expect(restored.y, saved.y);
+    expect(restored.width, saved.width);
+    expect(restored.height, saved.height);
+  });
 }

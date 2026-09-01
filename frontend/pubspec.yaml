@@ -12,6 +12,7 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: ^0.20.3
+  pinyin: ^3.3.0
   file_picker: ^8.0.0
   window_manager: ^0.4.2
   screen_retriever: 0.2.2

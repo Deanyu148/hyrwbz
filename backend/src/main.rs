@@ -8,6 +8,7 @@ mod db;
 mod excel;
 mod import_export;
 mod models;
+mod notifications;
 mod rpc;
 mod service;
 
@@ -70,7 +71,19 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(parent_watchdog(parent_pid));
     }
     let pool = db::init(&db::default_db_path()).await?;
+    let notification_store = notifications::NotificationStore::open().await?;
+    let notification_store_for_refresh = notification_store.clone();
+    let pool_for_refresh = pool.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Err(error) = notification_store_for_refresh.refresh(&pool_for_refresh).await {
+                #[cfg(debug_assertions)]
+                tracing::warn!("notification refresh failed: {}", error);
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
+        }
+    });
     #[cfg(debug_assertions)]
     tracing::info!("listening on local socket {}", socket_path);
-    rpc::serve(&socket_path, pool).await
+    rpc::serve(&socket_path, pool, notification_store).await
 }
