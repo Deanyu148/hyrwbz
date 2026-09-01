@@ -1,4 +1,4 @@
-name: Build Windows Installer
+name: Build Windows
 
 on:
   push:
@@ -108,6 +108,18 @@ jobs:
           Copy-Item -Recurse -Force frontend\build\windows\x64\runner\Release\* "$dist\frontend\"
           Copy-Item -Force backend\target\release\hyrwbz_backend.exe "$dist\"
 
+      - name: Build portable zip
+        shell: pwsh
+        run: |
+          $ver = $env:APP_VERSION
+          $portableDir = "build\portable\hyrwbz_portable_$ver"
+          New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
+          # Flutter 前端产物（exe + dll + data）和 Rust 后端放在同一目录
+          Copy-Item -Recurse -Force frontend\build\windows\x64\runner\Release\* "$portableDir\"
+          Copy-Item -Force backend\target\release\hyrwbz_backend.exe "$portableDir\"
+          Compress-Archive -Path $portableDir -DestinationPath "build\portable\hyrwbz_portable_$ver.zip" -CompressionLevel Optimal
+          Write-Host "Portable zip: build\portable\hyrwbz_portable_$ver.zip"
+
       - name: Verify Inno Setup
         shell: pwsh
         run: |
@@ -142,6 +154,13 @@ jobs:
           path: build/installer/*.exe
           if-no-files-found: error
 
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyrwbz-portable-${{ steps.tag.outputs.TAG }}
+          path: build/portable/*.zip
+          if-no-files-found: error
+
       - name: Create tag and release
         uses: softprops/action-gh-release@v2
         with:
@@ -149,4 +168,6 @@ jobs:
           name: HYRWBZ ${{ steps.tag.outputs.TAG }}
           body: ${{ steps.tag.outputs.TAG }}
           prerelease: ${{ env.IS_PRE_RELEASE == 'true' }}
-          files: build/installer/*.exe
+          files: |
+            build/installer/*.exe
+            build/portable/*.zip
