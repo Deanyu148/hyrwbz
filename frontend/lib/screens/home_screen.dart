@@ -118,18 +118,22 @@ class _HomeScreenState extends State<HomeScreen> {
     await _reload();
   }
 
+  Future<void> _openDelayScreen(Task task) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => DelayScreen(task: task),
+    );
+    if (mounted) await _reload();
+  }
+
   Future<void> _addDelay() async {
     final sel = _selected;
     if (sel.length != 1) {
       _toast('请选中一条条目后添加延期');
       return;
     }
-    await showDialog<void>(
-      context: context,
-      builder: (_) => DelayScreen(task: sel.first),
-    );
+    await _openDelayScreen(sel.first);
     _selected.clear();
-    await _reload();
   }
 
   Future<void> _delDelay() async {
@@ -138,12 +142,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _toast('请选中一条条目查看/删除延期');
       return;
     }
-    await showDialog<void>(
-      context: context,
-      builder: (_) => DelayScreen(task: sel.first),
-    );
+    await _openDelayScreen(sel.first);
     _selected.clear();
-    await _reload();
   }
 
   Future<void> _openFilter() async {
@@ -332,6 +332,54 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _exportAllFiles() async {
+    final outDir = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: '选择导出目录（取消则使用默认目录）',
+    );
+    try {
+      final path = await Api.exportAllFiles(outDir);
+      _toast('数据库和附件已打包导出: $path');
+    } catch (e) {
+      _toast('导出所有文件失败: $e');
+    }
+  }
+
+  Future<void> _importAllFiles() async {
+    final res = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['zip'],
+    );
+    if (res == null || res.files.single.path == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('导入所有文件'),
+        content: const Text('将使用 ZIP 中的数据库和附件替换当前数据，是否继续？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('继续导入'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final path = res.files.single.path!;
+    final bytes = await File(path).readAsBytes();
+    try {
+      await Api.importAllFiles(bytes, res.files.single.name);
+      _selected.clear();
+      _toast('数据库和附件导入成功');
+      await _reload();
+    } catch (e) {
+      _toast('导入所有文件失败: $e');
+    }
+  }
+
   // ---- Responsive and resizable table builders ----
 
   List<double> _resolveColumnWidths(double availableWidth) {
@@ -475,7 +523,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               child: GestureDetector(
                 onTap: () => _viewTask(t),
-                onDoubleTap: () => _editTask(t),
+                onDoubleTap: () => i == 8 || i == 9
+                    ? _openDelayScreen(t)
+                    : _editTask(t),
                 onLongPress: () => _viewTask(t),
                 child: Tooltip(
                   message: cellTexts[i],
@@ -548,6 +598,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _MenuEntry(icon: Icons.table_view, label: '导出Excel', onTap: _exportExcel),
               _MenuEntry(icon: Icons.text_snippet, label: '导出CSV', onTap: _exportCsv),
               _MenuEntry(icon: Icons.storage, label: '导出数据库', onTap: _exportDb),
+              _MenuEntry(icon: Icons.archive_outlined, label: '导出所有文件', onTap: _exportAllFiles),
             ],
           ),
           _ClickMenuButton(
@@ -557,6 +608,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _MenuEntry(icon: Icons.table_view, label: '导入Excel', onTap: _importExcel),
               _MenuEntry(icon: Icons.text_snippet, label: '导入CSV', onTap: _importCsv),
               _MenuEntry(icon: Icons.storage, label: '导入数据库', onTap: _importDb),
+              _MenuEntry(icon: Icons.unarchive_outlined, label: '导入所有文件', onTap: _importAllFiles),
             ],
           ),
         ],
@@ -628,7 +680,7 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
     _dept = TextEditingController();
     _owner = TextEditingController();
     _required = TextEditingController();
-    _actual = TextEditingController();
+    _actual = TextEditingController(text: '进行中');
     _remark = TextEditingController();
     _loadLocked();
   }
@@ -770,7 +822,6 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
                     child: TextField(
                       controller: _required,
                       decoration: const InputDecoration(labelText: '计划完成时间'),
-                      onTap: () => _pick(_required, '计划完成时间'),
                     ),
                   ),
                   IconButton(icon: const Icon(Icons.calendar_month), onPressed: () => _pick(_required, '计划完成时间')),
@@ -779,7 +830,6 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
                     child: TextField(
                       controller: _actual,
                       decoration: const InputDecoration(labelText: '实际完成时间'),
-                      onTap: () => _pick(_actual, '实际完成时间'),
                     ),
                   ),
                   IconButton(icon: const Icon(Icons.calendar_month), onPressed: () => _pick(_actual, '实际完成时间')),

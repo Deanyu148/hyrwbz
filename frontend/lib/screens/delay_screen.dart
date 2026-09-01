@@ -94,14 +94,7 @@ class _DelayScreenState extends State<DelayScreen> {
                   width: 160,
                   child: TextField(
                     controller: _date,
-                    decoration: const InputDecoration(labelText: '延期日期 (YYYY/MM/DD)'),
-                    onTap: () async {
-                      final v = await showDialog<String>(
-                        context: context,
-                        builder: (_) => DatePickerDialogWidget(initial: _date.text, title: '延期日期'),
-                      );
-                      if (v != null) setState(() => _date.text = v);
-                    },
+                    decoration: const InputDecoration(labelText: '延期日期/状态'),
                   ),
                 ),
                 IconButton(

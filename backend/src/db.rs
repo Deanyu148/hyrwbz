@@ -20,6 +20,10 @@ pub async fn init(db_path: &str) -> Result<Db> {
     for sql in MIGRATIONS.iter() {
         sqlx::query(sql).execute(&pool).await?;
     }
+    // 旧版本允许未完成任务的实际完成时间为空；统一迁移为明确的进行中状态。
+    sqlx::query("UPDATE tasks SET actual_date = '进行中' WHERE trim(actual_date) = ''")
+        .execute(&pool)
+        .await?;
     Ok(pool)
 }
 

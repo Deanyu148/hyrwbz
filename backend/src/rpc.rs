@@ -67,6 +67,11 @@ struct UploadParam {
     task_id: i64,
     filename: String,
 }
+#[derive(Debug, Deserialize)]
+struct UpdateAttachmentParam {
+    id: i64,
+    filename: String,
+}
 
 pub async fn serve(socket_path: &str, db: Db) -> anyhow::Result<()> {
     let name = socket_path.to_fs_name::<GenericFilePath>()?;
@@ -130,6 +135,10 @@ async fn dispatch(db: &Db, request: RequestHeader, binary: Vec<u8>) -> Frame {
                 json!({"path": import_export::export_csv(db, param.filter, param.out_dir).await.map_err(service::ServiceError::internal)?})
             }
             "export.database" => json!({"path": import_export::export_db_file().await.map_err(service::ServiceError::internal)?}),
+            "export.all_files" => {
+                let param: ExportParam = decode(request.params)?;
+                json!({"path": import_export::export_all_files(db, param.out_dir).await.map_err(service::ServiceError::internal)?})
+            }
             "import.excel" => {
                 let param: ImportParam = decode(request.params)?;
                 let ext = excel_extension(&param.filename, &binary);
@@ -165,10 +174,22 @@ async fn dispatch(db: &Db, request: RequestHeader, binary: Vec<u8>) -> Frame {
                 result?;
                 json!({"ok": true})
             }
+            "import.all_files" => {
+                let _: ImportParam = decode(request.params)?;
+                let path = write_temp("all_files", "zip", &binary)?;
+                let result = import_export::import_all_files(db, path.to_string_lossy().as_ref()).await.map_err(service::ServiceError::internal);
+                std::fs::remove_file(&path).ok();
+                result?;
+                json!({"ok": true})
+            }
             "attachment.list" => serde_json::to_value(service::list_attachments(db, decode::<TaskIdParam>(request.params)?.task_id).await?).map_err(service::ServiceError::internal)?,
             "attachment.upload" => {
                 let param: UploadParam = decode(request.params)?;
                 serde_json::to_value(service::upload_attachment(db, param.task_id, param.filename, &binary).await?).map_err(service::ServiceError::internal)?
+            }
+            "attachment.update" => {
+                let param: UpdateAttachmentParam = decode(request.params)?;
+                serde_json::to_value(service::update_attachment(db, param.id, param.filename, &binary).await?).map_err(service::ServiceError::internal)?
             }
             "attachment.delete" => service::delete_attachment(db, decode::<IdParam>(request.params)?.id).await?,
             "attachment.download" => {
@@ -343,6 +364,7 @@ mod tests {
         )
         .await;
         let task_id = created.header["result"]["id"].as_i64().unwrap();
+        assert_eq!(created.header["result"]["actual_date"], "进行中");
 
         let payload = vec![0, 1, 2, 3, 254, 255];
         let uploaded = dispatch(
@@ -369,6 +391,32 @@ mod tests {
         .await;
         assert_eq!(downloaded.header["result"]["filename"], "binary.dat");
         assert_eq!(downloaded.binary, payload);
+
+        let updated_payload = vec![9, 8, 7, 6];
+        let updated = dispatch(
+            &db,
+            RequestHeader {
+                id: 4,
+                method: "attachment.update".to_string(),
+                params: json!({"id": attachment_id, "filename": "updated.dat"}),
+            },
+            updated_payload.clone(),
+        )
+        .await;
+        assert_eq!(updated.header["result"]["filename"], "updated.dat");
+
+        let downloaded = dispatch(
+            &db,
+            RequestHeader {
+                id: 5,
+                method: "attachment.download".to_string(),
+                params: json!({"id": attachment_id}),
+            },
+            Vec::new(),
+        )
+        .await;
+        assert_eq!(downloaded.header["result"]["filename"], "updated.dat");
+        assert_eq!(downloaded.binary, updated_payload);
 
         let _ = service::delete_attachment(&db, attachment_id).await;
         drop(db);

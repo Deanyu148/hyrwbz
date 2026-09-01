@@ -294,7 +294,6 @@ class _DateRangeFieldState extends State<DateRangeField> {
       width: 150,
       child: TextField(
         controller: controller,
-        readOnly: true,
         decoration: InputDecoration(
           hintText: from ? '开始' : '结束',
           suffixIcon: IconButton(
@@ -302,7 +301,6 @@ class _DateRangeFieldState extends State<DateRangeField> {
             onPressed: () => _pick(from),
           ),
         ),
-        onTap: () => _pick(from),
       ),
     );
   }

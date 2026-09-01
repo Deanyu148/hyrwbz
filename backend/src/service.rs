@@ -218,11 +218,16 @@ pub async fn create_task(db: &Db, req: CreateTaskReq) -> ServiceResult<Task> {
             .await
             .map_err(internal)?;
     let task_no = max.unwrap_or(0) + 1;
+    let actual_date = if req.actual_date.trim().is_empty() {
+        "进行中".to_string()
+    } else {
+        req.actual_date
+    };
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let result = sqlx::query(
         "INSERT INTO tasks (meeting_no, task_no, task_desc, dept, owner, required_date, actual_date, remark, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
     ).bind(meeting).bind(task_no).bind(&req.task_desc).bind(&req.dept).bind(&req.owner)
-        .bind(&req.required_date).bind(&req.actual_date).bind(&req.remark).bind(&now)
+        .bind(&req.required_date).bind(&actual_date).bind(&req.remark).bind(&now)
         .execute(db).await.map_err(internal)?;
     Ok(Task {
         id: result.last_insert_rowid(),
@@ -232,7 +237,7 @@ pub async fn create_task(db: &Db, req: CreateTaskReq) -> ServiceResult<Task> {
         dept: req.dept,
         owner: req.owner,
         required_date: req.required_date,
-        actual_date: req.actual_date,
+        actual_date,
         remark: req.remark,
         created_at: now.clone(),
         updated_at: now,
@@ -242,10 +247,15 @@ pub async fn create_task(db: &Db, req: CreateTaskReq) -> ServiceResult<Task> {
 }
 
 pub async fn update_task(db: &Db, id: i64, req: UpdateTaskReq) -> ServiceResult<Value> {
+    let actual_date = if req.actual_date.trim().is_empty() {
+        "进行中".to_string()
+    } else {
+        req.actual_date
+    };
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     sqlx::query("UPDATE tasks SET meeting_no=?1, task_no=?2, task_desc=?3, dept=?4, owner=?5, required_date=?6, actual_date=?7, remark=?8, updated_at=?9 WHERE id=?10")
         .bind(&req.meeting_no).bind(req.task_no).bind(&req.task_desc).bind(&req.dept)
-        .bind(&req.owner).bind(&req.required_date).bind(&req.actual_date).bind(&req.remark)
+        .bind(&req.owner).bind(&req.required_date).bind(&actual_date).bind(&req.remark)
         .bind(&now).bind(id).execute(db).await.map_err(internal)?;
     Ok(json!({"ok": true}))
 }
@@ -362,7 +372,7 @@ pub async fn delete_attachment(db: &Db, id: i64) -> ServiceResult<Value> {
         .map_err(internal)?
     {
         let stored: String = row.try_get("stored_name").unwrap_or_default();
-        std::fs::remove_file(storage_base().join("attachments").join(stored)).ok();
+        remove_attachment_file(&attachment_path(&stored))?;
     }
     sqlx::query("DELETE FROM attachments WHERE id = ?1")
         .bind(id)
@@ -374,6 +384,35 @@ pub async fn delete_attachment(db: &Db, id: i64) -> ServiceResult<Value> {
 
 fn sanitize_dir_name(value: &str) -> String {
     value.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
+}
+
+fn attachment_path(stored_name: &str) -> PathBuf {
+    storage_base().join("attachments").join(stored_name)
+}
+
+fn build_stored_name(meeting_no: &str, task_no: i64, filename: &str) -> String {
+    format!(
+        "{}/{}/{}_{}",
+        sanitize_dir_name(meeting_no),
+        task_no,
+        uuid::Uuid::new_v4(),
+        sanitize_dir_name(filename)
+    )
+}
+
+fn write_attachment(path: &Path, data: &[u8]) -> ServiceResult<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(internal)?;
+    }
+    std::fs::write(path, data).map_err(internal)
+}
+
+fn remove_attachment_file(path: &Path) -> ServiceResult<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(internal(error)),
+    }
 }
 
 pub async fn upload_attachment(
@@ -392,23 +431,77 @@ pub async fn upload_attachment(
         .map_err(internal)?;
     let meeting_no: String = row.try_get("meeting_no").unwrap_or_default();
     let task_no: i64 = row.try_get("task_no").unwrap_or_default();
-    let stored_name = format!(
-        "{}/{}/{}_{}",
-        sanitize_dir_name(&meeting_no),
-        task_no,
-        uuid::Uuid::new_v4(),
-        sanitize_dir_name(&filename)
-    );
-    let file_path = storage_base().join("attachments").join(&stored_name);
-    if let Some(parent) = file_path.parent() {
-        std::fs::create_dir_all(parent).map_err(internal)?;
-    }
-    std::fs::write(&file_path, data).map_err(internal)?;
+    let stored_name = build_stored_name(&meeting_no, task_no, &filename);
+    let file_path = attachment_path(&stored_name);
+    write_attachment(&file_path, data)?;
+
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let result = sqlx::query("INSERT INTO attachments (task_id, filename, stored_name, created_at) VALUES (?1, ?2, ?3, ?4)")
-        .bind(task_id).bind(&filename).bind(&stored_name).bind(&now).execute(db).await.map_err(internal)?;
+        .bind(task_id)
+        .bind(&filename)
+        .bind(&stored_name)
+        .bind(&now)
+        .execute(db)
+        .await;
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            remove_attachment_file(&file_path).ok();
+            return Err(internal(error));
+        }
+    };
     Ok(Attachment {
         id: result.last_insert_rowid(),
+        task_id,
+        filename,
+        stored_name,
+        created_at: now,
+    })
+}
+
+pub async fn update_attachment(
+    db: &Db,
+    id: i64,
+    filename: String,
+    data: &[u8],
+) -> ServiceResult<Attachment> {
+    if filename.trim().is_empty() {
+        return Err(ServiceError::bad("filename 不能为空"));
+    }
+    let row = sqlx::query(
+        "SELECT a.task_id, a.stored_name, t.meeting_no, t.task_no
+         FROM attachments a JOIN tasks t ON t.id = a.task_id WHERE a.id = ?1",
+    )
+    .bind(id)
+    .fetch_one(db)
+    .await
+    .map_err(internal)?;
+    let task_id: i64 = row.try_get("task_id").unwrap_or_default();
+    let old_stored_name: String = row.try_get("stored_name").unwrap_or_default();
+    let meeting_no: String = row.try_get("meeting_no").unwrap_or_default();
+    let task_no: i64 = row.try_get("task_no").unwrap_or_default();
+    let stored_name = build_stored_name(&meeting_no, task_no, &filename);
+    let file_path = attachment_path(&stored_name);
+    write_attachment(&file_path, data)?;
+
+    let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let result = sqlx::query(
+        "UPDATE attachments SET filename = ?1, stored_name = ?2, created_at = ?3 WHERE id = ?4",
+    )
+    .bind(&filename)
+    .bind(&stored_name)
+    .bind(&now)
+    .bind(id)
+    .execute(db)
+    .await;
+    if let Err(error) = result {
+        remove_attachment_file(&file_path).ok();
+        return Err(internal(error));
+    }
+
+    remove_attachment_file(&attachment_path(&old_stored_name)).ok();
+    Ok(Attachment {
+        id,
         task_id,
         filename,
         stored_name,
@@ -424,7 +517,23 @@ pub async fn download_attachment(db: &Db, id: i64) -> ServiceResult<(String, Vec
         .map_err(internal)?;
     let filename: String = row.try_get("filename").unwrap_or_default();
     let stored_name: String = row.try_get("stored_name").unwrap_or_default();
-    let bytes =
-        std::fs::read(storage_base().join("attachments").join(stored_name)).map_err(internal)?;
+    let bytes = std::fs::read(attachment_path(&stored_name)).map_err(internal)?;
     Ok((filename, bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attachment_file_can_be_written_and_removed() {
+        let path = std::env::temp_dir().join(format!(
+            "hyrwbz_attachment_test_{}",
+            uuid::Uuid::new_v4()
+        ));
+        write_attachment(&path, b"attachment").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"attachment");
+        remove_attachment_file(&path).unwrap();
+        assert!(!path.exists());
+    }
 }

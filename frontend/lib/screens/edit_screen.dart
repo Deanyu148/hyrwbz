@@ -1,7 +1,9 @@
 import 'dart:io' show File;
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../api.dart';
+import '../attachment_launcher.dart';
 import '../input_formatters.dart';
 import '../models.dart';
 import 'date_picker_dialog.dart';
@@ -39,7 +41,7 @@ class _EditScreenState extends State<EditScreen> {
     _dept = TextEditingController(text: t.dept);
     _owner = TextEditingController(text: t.owner);
     _required = TextEditingController(text: t.requiredDate);
-    _actual = TextEditingController(text: t.actualDate);
+    _actual = TextEditingController(text: t.actualDate.isEmpty ? '进行中' : t.actualDate);
     _remark = TextEditingController(text: t.remark);
     _loadLock();
     _loadAttachments();
@@ -128,6 +130,128 @@ class _EditScreenState extends State<EditScreen> {
           SnackBar(content: Text('下载附件失败: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _openAttachment(Attachment attachment) async {
+    try {
+      final result = await Api.downloadAttachment(attachment.id);
+      final file = await createAttachmentWorkingCopy(
+        attachment.id,
+        result.filename,
+        result.bytes,
+      );
+      await launchAttachmentFile(file.path);
+    } catch (e) {
+      if (mounted) _toast('打开附件失败: $e');
+    }
+  }
+
+  Future<void> _updateAttachment(Attachment attachment) async {
+    final mode = await showDialog<_AttachmentUpdateMode>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('更新附件'),
+        content: Text('请选择更新“${attachment.filename}”的方式。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              _AttachmentUpdateMode.editDirectly,
+            ),
+            icon: const Icon(Icons.edit),
+            label: const Text('直接编辑文件'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              _AttachmentUpdateMode.chooseReplacement,
+            ),
+            icon: const Icon(Icons.folder_open),
+            label: const Text('重新选择文件'),
+          ),
+        ],
+      ),
+    );
+    if (mode == _AttachmentUpdateMode.editDirectly) {
+      await _editAttachmentDirectly(attachment);
+    } else if (mode == _AttachmentUpdateMode.chooseReplacement) {
+      await _chooseReplacementAttachment(attachment);
+    }
+  }
+
+  Future<void> _editAttachmentDirectly(Attachment attachment) async {
+    try {
+      final result = await Api.downloadAttachment(attachment.id);
+      final file = await createAttachmentWorkingCopy(
+        attachment.id,
+        result.filename,
+        result.bytes,
+      );
+      await launchAttachmentFile(file.path);
+      if (!mounted) return;
+      final upload = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('完成附件编辑'),
+          content: const Text('请在外部程序中保存文件，完成后返回此处并点击“更新附件”。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('更新附件'),
+            ),
+          ],
+        ),
+      );
+      if (upload != true) return;
+      final bytes = await file.readAsBytes();
+      await _applyAttachmentUpdate(attachment, bytes, result.filename);
+    } catch (e) {
+      if (mounted) _toast('直接编辑附件失败: $e');
+    }
+  }
+
+  Future<void> _chooseReplacementAttachment(Attachment attachment) async {
+    final res = await FilePicker.platform.pickFiles();
+    if (res == null || res.files.isEmpty) return;
+    final file = res.files.first;
+    if (file.path == null) return;
+    try {
+      final bytes = await File(file.path!).readAsBytes();
+      await _applyAttachmentUpdate(attachment, bytes, file.name);
+    } catch (e) {
+      if (mounted) _toast('读取替换文件失败: $e');
+    }
+  }
+
+  Future<void> _applyAttachmentUpdate(
+    Attachment attachment,
+    Uint8List bytes,
+    String filename,
+  ) async {
+    try {
+      final updated = await Api.updateAttachment(
+        attachment.id,
+        bytes,
+        filename,
+      );
+      if (!mounted) return;
+      setState(() {
+        final index = _attachments.indexWhere((value) => value.id == attachment.id);
+        if (index >= 0) _attachments[index] = updated;
+        _attachmentsChanged = true;
+      });
+      _toast('附件已更新');
+    } catch (e) {
+      if (mounted) _toast('更新附件失败: $e');
     }
   }
 
@@ -234,7 +358,6 @@ class _EditScreenState extends State<EditScreen> {
                     child: TextField(
                       controller: _required,
                       decoration: const InputDecoration(labelText: '计划完成时间'),
-                      onTap: () => _pick(_required, '计划完成时间'),
                     ),
                   ),
                   IconButton(icon: const Icon(Icons.calendar_month), onPressed: () => _pick(_required, '计划完成时间')),
@@ -243,7 +366,6 @@ class _EditScreenState extends State<EditScreen> {
                     child: TextField(
                       controller: _actual,
                       decoration: const InputDecoration(labelText: '实际完成时间'),
-                      onTap: () => _pick(_actual, '实际完成时间'),
                     ),
                   ),
                   IconButton(icon: const Icon(Icons.calendar_month), onPressed: () => _pick(_actual, '实际完成时间')),
@@ -282,7 +404,13 @@ class _EditScreenState extends State<EditScreen> {
                       final a = _attachments[i];
                       return ListTile(
                         leading: const Icon(Icons.attachment),
-                        title: Text(a.filename),
+                        title: GestureDetector(
+                          onDoubleTap: () => _openAttachment(a),
+                          child: Tooltip(
+                            message: '双击打开附件',
+                            child: Text(a.filename),
+                          ),
+                        ),
                         subtitle: Text(a.createdAt),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -291,6 +419,11 @@ class _EditScreenState extends State<EditScreen> {
                               icon: const Icon(Icons.download),
                               onPressed: () => _downloadAttachment(a),
                               tooltip: '下载',
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.sync),
+                              onPressed: () => _updateAttachment(a),
+                              tooltip: '更新',
                             ),
                             IconButton(
                               icon: const Icon(Icons.delete_outline),
@@ -327,4 +460,9 @@ class _EditScreenState extends State<EditScreen> {
       ],
     );
   }
+}
+
+enum _AttachmentUpdateMode {
+  editDirectly,
+  chooseReplacement,
 }

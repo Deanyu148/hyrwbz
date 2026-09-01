@@ -124,6 +124,24 @@ class Api {
     );
   }
 
+  static Future<String> exportAllFiles(String? outDir) async {
+    final reply = await _call(
+      'export.all_files',
+      params: {if (outDir != null) 'out_dir': outDir},
+      timeout: const Duration(minutes: 5),
+    );
+    return (reply.result as Map)['path'] as String;
+  }
+
+  static Future<void> importAllFiles(Uint8List bytes, String filename) async {
+    await _call(
+      'import.all_files',
+      params: {'filename': filename},
+      binary: bytes,
+      timeout: const Duration(minutes: 10),
+    );
+  }
+
   static Future<List<Attachment>> listAttachments(int taskId) async {
     final reply = await _call('attachment.list', params: {'task_id': taskId});
     return (reply.result as List)
@@ -139,6 +157,20 @@ class Api {
     final reply = await _call(
       'attachment.upload',
       params: {'task_id': taskId, 'filename': filename},
+      binary: bytes,
+      timeout: const Duration(minutes: 2),
+    );
+    return Attachment.fromJson(Map<String, dynamic>.from(reply.result as Map));
+  }
+
+  static Future<Attachment> updateAttachment(
+    int id,
+    Uint8List bytes,
+    String filename,
+  ) async {
+    final reply = await _call(
+      'attachment.update',
+      params: {'id': id, 'filename': filename},
       binary: bytes,
       timeout: const Duration(minutes: 2),
     );

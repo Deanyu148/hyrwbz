@@ -5,7 +5,7 @@ use chrono::Local;
 use sqlx::Row;
 use std::fs;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub async fn export_db_file() -> Result<String> {
     let src = db::default_db_path();
@@ -15,6 +15,172 @@ pub async fn export_db_file() -> Result<String> {
     let dst = dir.join(format!("data_{}.db", now));
     fs::copy(&src, &dst)?;
     Ok(dst.to_string_lossy().to_string())
+}
+
+pub async fn export_all_files(db: &Db, out_dir: Option<String>) -> Result<String> {
+    let now = Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let dir = out_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(default_export_dir);
+    let attachments = application_base().join("attachments");
+    anyhow::ensure!(
+        !dir.starts_with(&attachments),
+        "导出目录不能位于附件目录内"
+    );
+    fs::create_dir_all(&dir)?;
+    let output = dir.join(format!("hyrwbz_all_files_{}.zip", now));
+    let snapshot = std::env::temp_dir().join(format!(
+        "hyrwbz_bundle_{}.db",
+        uuid::Uuid::new_v4()
+    ));
+    let escaped_snapshot = snapshot.to_string_lossy().replace('\'', "''");
+    sqlx::query(&format!("VACUUM INTO '{}'", escaped_snapshot))
+        .execute(db)
+        .await?;
+
+    let result = (|| -> Result<()> {
+        let file = fs::File::create(&output)?;
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        writer.start_file("data.db", options)?;
+        let mut database = fs::File::open(&snapshot)?;
+        std::io::copy(&mut database, &mut writer)?;
+
+        writer.add_directory("attachments/", options)?;
+        if attachments.exists() {
+            add_directory_to_zip(&mut writer, &attachments, "attachments", options)?;
+        }
+        writer.finish()?;
+        Ok(())
+    })();
+    fs::remove_file(&snapshot).ok();
+    if let Err(error) = result {
+        fs::remove_file(&output).ok();
+        return Err(error);
+    }
+    Ok(output.to_string_lossy().to_string())
+}
+
+pub async fn import_all_files(db: &Db, zip_path: &str) -> Result<()> {
+    let staging = std::env::temp_dir().join(format!(
+        "hyrwbz_bundle_import_{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&staging)?;
+    let result = async {
+        let file = fs::File::open(zip_path)?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index)?;
+            let enclosed = entry
+                .enclosed_name()
+                .ok_or_else(|| anyhow::anyhow!("ZIP 包含不安全路径: {}", entry.name()))?
+                .to_path_buf();
+            let allowed = enclosed == Path::new("data.db")
+                || enclosed.starts_with(Path::new("attachments"));
+            if !allowed {
+                continue;
+            }
+            let target = staging.join(&enclosed);
+            if entry.is_dir() {
+                fs::create_dir_all(&target)?;
+            } else {
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let mut output = fs::File::create(&target)?;
+                std::io::copy(&mut entry, &mut output)?;
+            }
+        }
+
+        drop(archive);
+        let database = staging.join("data.db");
+        anyhow::ensure!(database.is_file(), "ZIP 中缺少 data.db");
+        let staged_attachments = staging.join("attachments");
+        fs::create_dir_all(&staged_attachments)?;
+        import_db_file(db, database.to_string_lossy().as_ref()).await?;
+        replace_attachments_directory(&staged_attachments)?;
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    fs::remove_dir_all(&staging).ok();
+    result
+}
+
+fn application_base() -> PathBuf {
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    exe.parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()
+}
+
+fn add_directory_to_zip(
+    writer: &mut zip::ZipWriter<fs::File>,
+    directory: &Path,
+    zip_prefix: &str,
+    options: zip::write::SimpleFileOptions,
+) -> Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = format!(
+            "{}/{}",
+            zip_prefix.trim_end_matches('/'),
+            entry.file_name().to_string_lossy()
+        )
+        .replace('\\', "/");
+        if path.is_dir() {
+            writer.add_directory(format!("{}/", name), options)?;
+            add_directory_to_zip(writer, &path, &name, options)?;
+        } else if path.is_file() {
+            writer.start_file(name, options)?;
+            let mut input = fs::File::open(&path)?;
+            std::io::copy(&mut input, writer)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_directory(source: &Path, target: &Path) -> Result<()> {
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_directory(&source_path, &target_path)?;
+        } else if source_path.is_file() {
+            fs::copy(&source_path, &target_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn replace_attachments_directory(source: &Path) -> Result<()> {
+    let base = application_base();
+    let target = base.join("attachments");
+    let incoming = base.join(format!(
+        "attachments_import_{}",
+        uuid::Uuid::new_v4()
+    ));
+    let backup = base.join(format!(
+        "attachments_backup_{}",
+        uuid::Uuid::new_v4()
+    ));
+    copy_directory(source, &incoming)?;
+    if target.exists() {
+        fs::rename(&target, &backup)?;
+    }
+    if let Err(error) = fs::rename(&incoming, &target) {
+        if backup.exists() {
+            fs::rename(&backup, &target).ok();
+        }
+        fs::remove_dir_all(&incoming).ok();
+        return Err(error.into());
+    }
+    fs::remove_dir_all(&backup).ok();
+    Ok(())
 }
 
 pub async fn import_db_file(db: &Db, src_path: &str) -> Result<()> {
@@ -298,6 +464,11 @@ async fn import_rows(
         let owner = get_str(col_owner);
         let required_date = get_str(col_required);
         let actual_date = get_str(col_actual);
+        let actual_date = if actual_date.is_empty() {
+            "进行中".to_string()
+        } else {
+            actual_date
+        };
         let remark = get_str(col_remark);
         let delay_date = get_str(col_delay);
         // 延期理由依赖延期记录。没有延期时间时保留任务备注，避免内容丢失。
@@ -500,6 +671,37 @@ mod tests {
             writer.write_record(row).unwrap();
         }
         writer.flush().unwrap();
+    }
+
+    #[test]
+    fn bundle_zip_contains_nested_attachments() {
+        let root = std::env::temp_dir().join(format!(
+            "hyrwbz_bundle_test_{}",
+            uuid::Uuid::new_v4()
+        ));
+        let attachments = root.join("attachments").join("MEETING").join("1");
+        fs::create_dir_all(&attachments).unwrap();
+        fs::write(attachments.join("file.txt"), b"content").unwrap();
+        let zip_path = root.join("bundle.zip");
+        let file = fs::File::create(&zip_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        writer.add_directory("attachments/", options).unwrap();
+        add_directory_to_zip(&mut writer, &root.join("attachments"), "attachments", options)
+            .unwrap();
+        writer.finish().unwrap();
+
+        let file = fs::File::open(&zip_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut entry = archive
+            .by_name("attachments/MEETING/1/file.txt")
+            .unwrap();
+        let mut content = String::new();
+        entry.read_to_string(&mut content).unwrap();
+        assert_eq!(content, "content");
+        drop(entry);
+        drop(archive);
+        fs::remove_dir_all(root).ok();
     }
 
     #[tokio::test]
