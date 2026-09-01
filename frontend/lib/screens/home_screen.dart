@@ -330,7 +330,7 @@ class _HomeScreenState extends State<HomeScreen> {
       lastDelay?.delayReason ?? '', t.hasAttachment ? '有' : '无', t.remark,
     ];
     return Container(
-      color: isSelected ? Colors.blue.withOpacity(0.1) : null,
+      color: isSelected ? Colors.blue.withValues(alpha: 0.1) : null,
       child: Row(
         children: [
           SizedBox(
@@ -442,7 +442,7 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Column(
         children: [
           Container(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: _buildActionBar(),
           ),
@@ -600,7 +600,7 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
                 Container(
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+                  decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
                   child: Row(
                     children: [
                       const Icon(Icons.lock, size: 16),

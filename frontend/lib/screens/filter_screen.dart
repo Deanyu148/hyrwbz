@@ -79,7 +79,7 @@ class _FilterScreenState extends State<FilterScreen> {
                   SizedBox(
                     width: 150,
                     child: DropdownButtonFormField<int>(
-                      value: _attachmentMode,
+                      initialValue: _attachmentMode,
                       decoration: const InputDecoration(
                         labelText: '附件状态',
                         isDense: true,

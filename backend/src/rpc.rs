@@ -1,7 +1,7 @@
 use crate::db::Db;
-use crate::models::{CreateDelayReq, CreateTaskReq, FilterReq, SetLockedMeetingReq, UpdateTaskReq};
+use crate::models::{CreateDelayReq, FilterReq, SetLockedMeetingReq, UpdateTaskReq};
 use crate::{excel, import_export, service};
-use interprocess::local_socket::tokio::{Listener, Stream};
+use interprocess::local_socket::tokio::Stream;
 use interprocess::local_socket::traits::tokio::Listener as _;
 use interprocess::local_socket::{GenericFilePath, ListenerOptions, ToFsName};
 use serde::de::DeserializeOwned;
@@ -73,9 +73,9 @@ pub async fn serve(socket_path: &str, db: Db) -> anyhow::Result<()> {
         let stream = listener.accept().await?;
         let db = db.clone();
         tokio::spawn(async move {
-            if let Err(error) = handle_connection(stream, db).await {
+            if let Err(_error) = handle_connection(stream, db).await {
                 #[cfg(debug_assertions)]
-                tracing::warn!("local RPC connection closed: {}", error);
+                tracing::warn!("local RPC connection closed: {}", _error);
             }
         });
     }
@@ -364,7 +364,7 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn windows_local_socket_health_smoke() {
-        use interprocess::local_socket::tokio::prelude::Stream as _;
+        use interprocess::local_socket::traits::tokio::Stream as _;
 
         let unique = uuid::Uuid::new_v4();
         let socket_path = format!(r"\\.\pipe\hyrwbz_test_{unique}");

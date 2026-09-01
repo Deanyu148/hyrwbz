@@ -97,6 +97,8 @@ jobs:
           Set-Location frontend
           flutter create --platforms=windows --project-name=hyrwbz_frontend --overwrite .
           git checkout -- lib/ test/ pubspec.yaml
+          # flutter create 会生成模板测试；仓库没有跟踪该文件，checkout 不会删除它。
+          Remove-Item -Force test\widget_test.dart -ErrorAction SilentlyContinue
           flutter pub get
           flutter analyze
           flutter test

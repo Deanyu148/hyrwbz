@@ -48,7 +48,7 @@ class BackendManager {
 
   String _newSocketPath() {
     final nonce = '${DateTime.now().microsecondsSinceEpoch}_${_generation++}';
-    if (Platform.isWindows) return r'\\.\pipe\hyrwbz_' + '${pid}_$nonce';
+    if (Platform.isWindows) return r'\\.\pipe\hyrwbz_' '${pid}_$nonce';
     return '${Directory.systemTemp.path}/hyrwbz_${pid}_$nonce.sock';
   }
 

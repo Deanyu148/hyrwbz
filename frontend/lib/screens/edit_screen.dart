@@ -153,11 +153,13 @@ class _EditScreenState extends State<EditScreen> {
           await Api.setLockedMeeting('');
         }
       }
-      if (mounted) Navigator.pop(context, true);
+      if (!mounted) return;
+      Navigator.pop(context, true);
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('保存失败: $e')));
+      setState(() => _saving = false);
     }
-    setState(() => _saving = false);
   }
 
   Future<void> _pick(TextEditingController c, String title) async {
