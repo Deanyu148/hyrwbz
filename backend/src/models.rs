@@ -82,6 +82,7 @@ pub struct FilterReq {
     pub delay_date_from: Option<String>,
     pub delay_date_to: Option<String>,
     pub delay_index: Option<i64>,
+    pub expected_remaining_days: Option<i64>,
     pub has_attachment: Option<bool>,
 }
 

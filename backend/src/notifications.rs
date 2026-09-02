@@ -34,7 +34,11 @@ pub struct NotificationStore {
 impl NotificationStore {
     pub async fn open() -> Result<Self> {
         let path = notification_db_path();
-        if let Some(parent) = Path::new(&path).parent() {
+        Self::open_at(&path).await
+    }
+
+    async fn open_at(path: &str) -> Result<Self> {
+        if let Some(parent) = Path::new(path).parent() {
             std::fs::create_dir_all(parent).ok();
         }
         let db = sqlx::sqlite::SqlitePoolOptions::new()
@@ -48,6 +52,7 @@ impl NotificationStore {
             "CREATE TABLE IF NOT EXISTS notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_id INTEGER NOT NULL,
+                source_key TEXT NOT NULL,
                 meeting_no TEXT NOT NULL,
                 task_no INTEGER NOT NULL,
                 expected_date TEXT NOT NULL,
@@ -63,6 +68,7 @@ impl NotificationStore {
             "CREATE TABLE IF NOT EXISTS notification_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_id INTEGER NOT NULL,
+                source_key TEXT NOT NULL,
                 meeting_no TEXT NOT NULL,
                 task_no INTEGER NOT NULL,
                 expected_date TEXT NOT NULL,
@@ -75,6 +81,20 @@ impl NotificationStore {
         )
         .execute(&db)
         .await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS notification_read_state (
+                task_id INTEGER NOT NULL,
+                source_key TEXT NOT NULL,
+                expected_date TEXT NOT NULL,
+                notification_date TEXT NOT NULL,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(task_id, source_key, expected_date, notification_date)
+            )",
+        )
+        .execute(&db)
+        .await?;
+        ensure_source_key_column(&db, "notifications").await?;
+        ensure_source_key_column(&db, "notification_history").await?;
         Ok(Self {
             db,
             refresh_lock: Arc::new(Mutex::new(())),
@@ -97,21 +117,39 @@ impl NotificationStore {
                 continue;
             };
             let notification_date = today.format("%Y-%m-%d").to_string();
+            let source_key = notification_source_key(&task);
             let old_read: Option<i64> = sqlx::query_scalar(
-                "SELECT is_read FROM notification_history
-                 WHERE task_id = ?1 AND expected_date = ?2 AND notification_date = ?3",
+                "SELECT is_read FROM notification_read_state
+                 WHERE task_id = ?1 AND expected_date = ?2 AND notification_date = ?3
+                   AND source_key = ?4",
             )
             .bind(task.id)
             .bind(&expected_date)
             .bind(&notification_date)
+            .bind(&source_key)
             .fetch_optional(&mut *tx)
             .await?;
             let is_read = old_read.unwrap_or(0) != 0;
             sqlx::query(
+                "INSERT INTO notification_read_state
+                 (task_id, source_key, expected_date, notification_date, is_read)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(task_id, source_key, expected_date, notification_date)
+                 DO UPDATE SET is_read = excluded.is_read",
+            )
+            .bind(task.id)
+            .bind(&source_key)
+            .bind(&expected_date)
+            .bind(&notification_date)
+            .bind(if is_read { 1 } else { 0 })
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
                 "INSERT INTO notification_history
-                 (task_id, meeting_no, task_no, expected_date, remaining_days, message, notification_date, is_read)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 (task_id, source_key, meeting_no, task_no, expected_date, remaining_days, message, notification_date, is_read)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(task_id, expected_date, notification_date) DO UPDATE SET
+                   source_key = excluded.source_key,
                    meeting_no = excluded.meeting_no,
                    task_no = excluded.task_no,
                    remaining_days = excluded.remaining_days,
@@ -119,6 +157,7 @@ impl NotificationStore {
                    is_read = excluded.is_read",
             )
             .bind(task.id)
+            .bind(&source_key)
             .bind(&task.meeting_no)
             .bind(task.task_no)
             .bind(&expected_date)
@@ -128,12 +167,23 @@ impl NotificationStore {
             .bind(if is_read { 1 } else { 0 })
             .execute(&mut *tx)
             .await?;
-            sqlx::query(
-                "INSERT INTO notifications
-                 (task_id, meeting_no, task_no, expected_date, remaining_days, message, notification_date, is_read)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            let notification_id: i64 = sqlx::query_scalar(
+                "SELECT id FROM notification_history
+                 WHERE task_id = ?1 AND expected_date = ?2 AND notification_date = ?3",
             )
             .bind(task.id)
+            .bind(&expected_date)
+            .bind(&notification_date)
+            .fetch_one(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO notifications
+                 (id, task_id, source_key, meeting_no, task_no, expected_date, remaining_days, message, notification_date, is_read)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            )
+            .bind(notification_id)
+            .bind(task.id)
+            .bind(&source_key)
             .bind(&task.meeting_no)
             .bind(task.task_no)
             .bind(&expected_date)
@@ -144,6 +194,10 @@ impl NotificationStore {
             .execute(&mut *tx)
             .await?;
         }
+        sqlx::query("DELETE FROM notification_read_state WHERE notification_date <> ?1")
+            .bind(today.format("%Y-%m-%d").to_string())
+            .execute(&mut *tx)
+            .await?;
         sqlx::query(
             "DELETE FROM notification_history WHERE id NOT IN
              (SELECT id FROM notification_history ORDER BY id DESC LIMIT 30)",
@@ -166,17 +220,76 @@ impl NotificationStore {
         Ok(rows.into_iter().map(row_to_notification).collect())
     }
 
+    pub async fn history(
+        &self,
+        core_db: &Db,
+        from: Option<String>,
+        to: Option<String>,
+    ) -> Result<Vec<Notification>> {
+        self.refresh(core_db).await?;
+        let mut sql = String::from(
+            "SELECT id, task_id, meeting_no, task_no, expected_date, remaining_days,
+                    message, notification_date, is_read
+             FROM notification_history",
+        );
+        let mut conditions = Vec::new();
+        let mut params = Vec::new();
+        if let Some(from) = normalize_history_date(from) {
+            conditions.push(format!("notification_date >= ?{}", params.len() + 1));
+            params.push(from);
+        }
+        if let Some(to) = normalize_history_date(to) {
+            conditions.push(format!("notification_date <= ?{}", params.len() + 1));
+            params.push(to);
+        }
+        if !conditions.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conditions.join(" AND "));
+        }
+        sql.push_str(" ORDER BY notification_date DESC, remaining_days ASC, id DESC");
+        let query = params
+            .iter()
+            .fold(sqlx::query(&sql), |query, value| query.bind(value));
+        let rows = query.fetch_all(&self.db).await?;
+        Ok(rows.into_iter().map(row_to_notification).collect())
+    }
+
+    /// 导入会形成一批全新的计算结果：删除当天已读继承记录并立即重建，
+    /// 保证导入后生成的所有通知均为未读，同时保留以前日期的通知历史。
+    pub async fn reset_after_import(&self, core_db: &Db) -> Result<()> {
+        {
+            let _guard = self.refresh_lock.lock().await;
+            let notification_date = Local::now().date_naive().format("%Y-%m-%d").to_string();
+            let mut tx = self.db.begin().await?;
+            sqlx::query("DELETE FROM notifications")
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("DELETE FROM notification_history WHERE notification_date = ?1")
+                .bind(&notification_date)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("DELETE FROM notification_read_state WHERE notification_date = ?1")
+                .bind(notification_date)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
+        self.refresh(core_db).await
+    }
+
     pub async fn mark_read(&self, id: i64) -> Result<()> {
         let _guard = self.refresh_lock.lock().await;
         let mut tx = self.db.begin().await?;
-        let row = sqlx::query(
-            "SELECT task_id, expected_date, notification_date FROM notifications WHERE id = ?1",
+        let current = sqlx::query(
+            "SELECT task_id, source_key, expected_date, notification_date
+             FROM notifications WHERE id = ?1",
         )
         .bind(id)
         .fetch_optional(&mut *tx)
         .await?;
-        if let Some(row) = row {
+        if let Some(row) = current {
             let task_id: i64 = row.try_get("task_id")?;
+            let source_key: String = row.try_get("source_key")?;
             let expected_date: String = row.try_get("expected_date")?;
             let notification_date: String = row.try_get("notification_date")?;
             sqlx::query("UPDATE notifications SET is_read = 1 WHERE id = ?1")
@@ -185,13 +298,29 @@ impl NotificationStore {
                 .await?;
             sqlx::query(
                 "UPDATE notification_history SET is_read = 1
-                 WHERE task_id = ?1 AND expected_date = ?2 AND notification_date = ?3",
+                 WHERE id = ?1 AND source_key = ?2",
+            )
+            .bind(id)
+            .bind(&source_key)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE notification_read_state SET is_read = 1
+                 WHERE task_id = ?1 AND source_key = ?2
+                   AND expected_date = ?3 AND notification_date = ?4",
             )
             .bind(task_id)
+            .bind(source_key)
             .bind(expected_date)
             .bind(notification_date)
             .execute(&mut *tx)
             .await?;
+        } else {
+            // 历史通知不再存在于当前通知表中，仍可单独标记为已读。
+            sqlx::query("UPDATE notification_history SET is_read = 1 WHERE id = ?1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit().await?;
         Ok(())
@@ -199,17 +328,63 @@ impl NotificationStore {
 
     pub async fn mark_all_read(&self) -> Result<()> {
         let _guard = self.refresh_lock.lock().await;
+        let notification_date = Local::now().date_naive().format("%Y-%m-%d").to_string();
         let mut tx = self.db.begin().await?;
         sqlx::query("UPDATE notifications SET is_read = 1")
             .execute(&mut *tx)
             .await?;
         sqlx::query("UPDATE notification_history SET is_read = 1 WHERE notification_date = ?1")
-            .bind(Local::now().date_naive().format("%Y-%m-%d").to_string())
+            .bind(&notification_date)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE notification_read_state SET is_read = 1 WHERE notification_date = ?1")
+            .bind(notification_date)
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
         Ok(())
     }
+
+}
+
+fn normalize_history_date(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().replace('/', "-"))
+        .filter(|value| !value.is_empty())
+}
+
+async fn ensure_source_key_column(db: &Pool<Sqlite>, table: &str) -> Result<()> {
+    let rows = sqlx::query(&format!("PRAGMA table_info({table})"))
+        .fetch_all(db)
+        .await?;
+    let exists = rows.iter().any(|row| {
+        row.try_get::<String, _>("name")
+            .is_ok_and(|name| name == "source_key")
+    });
+    if !exists {
+        sqlx::query(&format!(
+            "ALTER TABLE {table} ADD COLUMN source_key TEXT NOT NULL DEFAULT ''"
+        ))
+        .execute(db)
+        .await?;
+    }
+    Ok(())
+}
+
+fn notification_source_key(task: &Task) -> String {
+    let last_delay = task.delays.last();
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        task.id,
+        task.meeting_no,
+        task.task_no,
+        task.required_date,
+        task.actual_date,
+        task.updated_at,
+        last_delay.map(|delay| delay.id).unwrap_or_default(),
+        last_delay.map(|delay| delay.delay_date.as_str()).unwrap_or(""),
+        last_delay.map(|delay| delay.created_at.as_str()).unwrap_or(""),
+    )
 }
 
 fn row_to_notification(row: sqlx::sqlite::SqliteRow) -> Notification {
@@ -339,9 +514,156 @@ mod tests {
     }
 
     #[test]
+    fn history_date_filter_accepts_picker_format() {
+        assert_eq!(
+            normalize_history_date(Some("2026/09/02".to_string())),
+            Some("2026-09-02".to_string())
+        );
+        assert_eq!(normalize_history_date(Some("  ".to_string())), None);
+    }
+
+    #[test]
     fn notification_skips_completed_or_far_future_tasks() {
         let today = NaiveDate::from_ymd_opt(2026, 9, 2).unwrap();
         assert!(build_notification(&task("2026/09/01", "2026/09/01", ""), today).is_none());
         assert!(build_notification(&task("进行中", "2026/09/09", ""), today).is_none());
     }
+    #[tokio::test]
+    async fn read_state_changes_only_on_item_click_and_import_resets_to_unread() {
+        let unique = uuid::Uuid::new_v4();
+        let core_path = std::env::temp_dir().join(format!("hyrwbz_notification_core_{unique}.db"));
+        let notification_path =
+            std::env::temp_dir().join(format!("hyrwbz_notification_state_{unique}.db"));
+        let core_db = crate::db::init(core_path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+        let expected = (Local::now().date_naive() + chrono::Duration::days(1))
+            .format("%Y/%m/%d")
+            .to_string();
+        sqlx::query(
+            "INSERT INTO tasks
+             (meeting_no, task_no, task_desc, dept, owner, required_date, actual_date, remark, created_at, updated_at)
+             VALUES ('纪要〔2026〕通知测试号', 1, '', '', '', ?1, '进行中', '', 'now', 'v1')",
+        )
+        .bind(expected)
+        .execute(&core_db)
+        .await
+        .unwrap();
+        let store = NotificationStore::open_at(notification_path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+
+        store.refresh(&core_db).await.unwrap();
+        let notification_id: i64 =
+            sqlx::query_scalar("SELECT id FROM notifications LIMIT 1")
+                .fetch_one(&store.db)
+                .await
+                .unwrap();
+        let unread: i64 = sqlx::query_scalar("SELECT is_read FROM notifications WHERE id = ?1")
+            .bind(notification_id)
+            .fetch_one(&store.db)
+            .await
+            .unwrap();
+        assert_eq!(unread, 0);
+
+        let today_text = Local::now().date_naive().format("%Y/%m/%d").to_string();
+        let history = store
+            .history(&core_db, Some(today_text.clone()), Some(today_text))
+            .await
+            .unwrap();
+        assert_eq!(history.len(), 1);
+        let future_text = (Local::now().date_naive() + chrono::Duration::days(1))
+            .format("%Y/%m/%d")
+            .to_string();
+        let future_history = store
+            .history(&core_db, Some(future_text), None)
+            .await
+            .unwrap();
+        assert!(future_history.is_empty());
+
+        store.mark_read(notification_id).await.unwrap();
+        let history_read: i64 =
+            sqlx::query_scalar("SELECT is_read FROM notification_history LIMIT 1")
+                .fetch_one(&store.db)
+                .await
+                .unwrap();
+        let persisted_read: i64 =
+            sqlx::query_scalar("SELECT is_read FROM notification_read_state LIMIT 1")
+                .fetch_one(&store.db)
+                .await
+                .unwrap();
+        assert_eq!(history_read, 1);
+        assert_eq!(persisted_read, 1);
+        store.refresh(&core_db).await.unwrap();
+        let read: i64 = sqlx::query_scalar("SELECT is_read FROM notifications LIMIT 1")
+            .fetch_one(&store.db)
+            .await
+            .unwrap();
+        assert_eq!(read, 1);
+
+        sqlx::query("UPDATE tasks SET updated_at = 'v2'")
+            .execute(&core_db)
+            .await
+            .unwrap();
+        store.refresh(&core_db).await.unwrap();
+        let changed_unread: i64 =
+            sqlx::query_scalar("SELECT is_read FROM notifications LIMIT 1")
+                .fetch_one(&store.db)
+                .await
+                .unwrap();
+        assert_eq!(changed_unread, 0);
+
+        store.mark_all_read().await.unwrap();
+        let all_current_read: i64 =
+            sqlx::query_scalar("SELECT MIN(is_read) FROM notifications")
+                .fetch_one(&store.db)
+                .await
+                .unwrap();
+        let all_history_read: i64 =
+            sqlx::query_scalar("SELECT MIN(is_read) FROM notification_history")
+                .fetch_one(&store.db)
+                .await
+                .unwrap();
+        let all_persisted_read: i64 =
+            sqlx::query_scalar("SELECT MIN(is_read) FROM notification_read_state")
+                .fetch_one(&store.db)
+                .await
+                .unwrap();
+        assert_eq!(all_current_read, 1);
+        assert_eq!(all_history_read, 1);
+        assert_eq!(all_persisted_read, 1);
+
+        store.reset_after_import(&core_db).await.unwrap();
+        let import_unread: i64 =
+            sqlx::query_scalar("SELECT is_read FROM notifications LIMIT 1")
+                .fetch_one(&store.db)
+                .await
+                .unwrap();
+        assert_eq!(import_unread, 0);
+
+        let historical_id: i64 =
+            sqlx::query_scalar("SELECT id FROM notification_history LIMIT 1")
+                .fetch_one(&store.db)
+                .await
+                .unwrap();
+        sqlx::query("DELETE FROM notifications")
+            .execute(&store.db)
+            .await
+            .unwrap();
+        store.mark_read(historical_id).await.unwrap();
+        let historical_read: i64 = sqlx::query_scalar(
+            "SELECT is_read FROM notification_history WHERE id = ?1",
+        )
+        .bind(historical_id)
+        .fetch_one(&store.db)
+        .await
+        .unwrap();
+        assert_eq!(historical_read, 1);
+
+        store.db.close().await;
+        core_db.close().await;
+        std::fs::remove_file(notification_path).ok();
+        std::fs::remove_file(core_path).ok();
+    }
+
 }

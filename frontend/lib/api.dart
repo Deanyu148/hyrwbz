@@ -101,6 +101,24 @@ class Api {
         .toList();
   }
 
+  static Future<List<NotificationItem>> listNotificationHistory({
+    String? from,
+    String? to,
+  }) async {
+    final reply = await _call(
+      'notification.history',
+      params: {
+        if (from != null && from.isNotEmpty) 'from': from,
+        if (to != null && to.isNotEmpty) 'to': to,
+      },
+    );
+    return (reply.result as List)
+        .map((value) => NotificationItem.fromJson(
+              Map<String, dynamic>.from(value as Map),
+            ))
+        .toList();
+  }
+
   static Future<void> markNotificationRead(int id) async {
     await _call('notification.mark_read', params: {'id': id});
   }

@@ -7,6 +7,8 @@ import '../api.dart';
 import '../input_formatters.dart';
 import '../models.dart';
 import '../notifications.dart';
+import '../search_field.dart';
+import '../task_search.dart';
 import '../table_layout.dart';
 import '../table_layout_store.dart';
 import '../task_sort.dart';
@@ -26,7 +28,9 @@ class _HomeScreenState extends State<HomeScreen> {
     '序号', '会议纪要号', '任务序号', '任务内容', '责任部门',
     '责任人', '计划完成时间', '实际完成时间', '最后延期', '延期理由', '附件', '备注',
   ];
+  List<Task> _allTasks = [];
   List<Task> _tasks = [];
+  final TextEditingController _searchController = TextEditingController();
   bool _loading = true;
   FilterReq _filter = const FilterReq();
   String _filterSummary = '';
@@ -48,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _persistColumnWidths();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -71,17 +76,31 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _reload() async {
     setState(() => _loading = true);
     try {
-      final tasks = await Api.listTasks(_filter);
-      _tasks = sortTasks(
-        tasks,
-        column: _sortColumn,
-        ascending: _sortAscending,
-      );
+      _allTasks = await Api.listTasks(_filter);
+      _rebuildVisibleTasks();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('加载失败: $e')));
     }
     setState(() => _loading = false);
+  }
+
+  void _rebuildVisibleTasks() {
+    final query = _searchController.text;
+    final matched = query.trim().isEmpty
+        ? List<Task>.from(_allTasks)
+        : _allTasks
+            .where((task) => taskMatchesSearch(task, query))
+            .toList();
+    _tasks = sortTasks(
+      matched,
+      column: _sortColumn,
+      ascending: _sortAscending,
+    );
+  }
+
+  void _searchTasks(String _) {
+    setState(_rebuildVisibleTasks);
   }
 
   void _toast(String s) {
@@ -185,6 +204,9 @@ class _HomeScreenState extends State<HomeScreen> {
       p.add('延期时间[${f.delayDateFrom ?? ''}~${f.delayDateTo ?? ''}]');
     }
     if (f.delayIndex != null) p.add('延期次数>=${f.delayIndex}');
+    if (f.expectedRemainingDays != null) {
+      p.add('期望剩余天数<=${f.expectedRemainingDays}天');
+    }
     if (f.hasAttachment != null) {
       p.add(f.hasAttachment! ? '有附件' : '无附件');
     }
@@ -468,11 +490,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _sortColumn = column;
         _sortAscending = true;
       }
-      _tasks = sortTasks(
-        _tasks,
-        column: _sortColumn,
-        ascending: _sortAscending,
-      );
+      _rebuildVisibleTasks();
     });
   }
 
@@ -674,7 +692,19 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('会议任务管理跟踪系统'),
+        title: Row(
+          children: [
+            const Text('会议任务管理跟踪系统'),
+            const SizedBox(width: 18),
+            Expanded(
+              child: AppSearchField(
+                controller: _searchController,
+                hintText: '搜索任务（空格分词、引号短语、-排除）',
+                onChanged: _searchTasks,
+              ),
+            ),
+          ],
+        ),
         actions: [
           NotificationButton(
             onOpenScreen: _openNotificationScreen,

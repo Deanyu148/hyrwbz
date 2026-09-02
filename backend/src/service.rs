@@ -2,7 +2,7 @@
 
 use crate::db::Db;
 use crate::models::*;
-use chrono::Local;
+use chrono::{Local, NaiveDate};
 use serde_json::{json, Value};
 use sqlx::Row;
 use std::collections::HashMap;
@@ -157,7 +157,27 @@ pub async fn list_tasks(db: &Db, f: &FilterReq) -> ServiceResult<Vec<Task>> {
     if let Some(minimum) = f.delay_index {
         tasks.retain(|task| task.delays.len() as i64 >= minimum);
     }
+    if let Some(maximum_days) = f.expected_remaining_days {
+        let today = Local::now().date_naive();
+        tasks.retain(|task| {
+            expected_date(task)
+                .map(|date| (date - today).num_days() <= maximum_days)
+                .unwrap_or(false)
+        });
+    }
     Ok(tasks)
+}
+
+fn expected_date(task: &Task) -> Option<NaiveDate> {
+    let value = task
+        .delays
+        .last()
+        .map(|delay| delay.delay_date.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(task.required_date.trim());
+    NaiveDate::parse_from_str(value, "%Y/%m/%d")
+        .or_else(|_| NaiveDate::parse_from_str(value, "%Y-%m-%d"))
+        .ok()
 }
 
 async fn build_tasks(rows: Vec<sqlx::sqlite::SqliteRow>, db: &Db) -> ServiceResult<Vec<Task>> {
@@ -536,4 +556,62 @@ mod tests {
         remove_attachment_file(&path).unwrap();
         assert!(!path.exists());
     }
+    #[tokio::test]
+    async fn expected_remaining_days_filter_uses_last_delay_or_required_date() {
+        let unique = uuid::Uuid::new_v4();
+        let path = std::env::temp_dir().join(format!("hyrwbz_expected_filter_{unique}.db"));
+        let db = crate::db::init(path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+        let today = Local::now().date_naive();
+        for (task_no, days) in [(1i64, -2i64), (2, 2), (3, 30), (4, 30)] {
+            let required = (today + chrono::Duration::days(days))
+                .format("%Y/%m/%d")
+                .to_string();
+            sqlx::query(
+                "INSERT INTO tasks
+                 (meeting_no, task_no, task_desc, dept, owner, required_date, actual_date, remark, created_at, updated_at)
+                 VALUES ('FILTER', ?1, '', '', '', ?2, '进行中', '', 'now', 'now')",
+            )
+            .bind(task_no)
+            .bind(required)
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+        let task_three_id: i64 =
+            sqlx::query_scalar("SELECT id FROM tasks WHERE meeting_no = 'FILTER' AND task_no = 3")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        let delayed = (today + chrono::Duration::days(1))
+            .format("%Y/%m/%d")
+            .to_string();
+        sqlx::query(
+            "INSERT INTO delays
+             (task_id, meeting_no, task_no, delay_date, delay_reason, created_at)
+             VALUES (?1, 'FILTER', 3, ?2, '', 'now')",
+        )
+        .bind(task_three_id)
+        .bind(delayed)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let tasks = list_tasks(
+            &db,
+            &FilterReq {
+                expected_remaining_days: Some(3),
+                ..FilterReq::default()
+            },
+        )
+        .await
+        .unwrap();
+        let task_numbers: Vec<i64> = tasks.into_iter().map(|task| task.task_no).collect();
+        assert_eq!(task_numbers, vec![1, 2, 3]);
+
+        db.close().await;
+        std::fs::remove_file(path).ok();
+    }
+
 }

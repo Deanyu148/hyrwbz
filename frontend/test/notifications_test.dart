@@ -23,7 +23,7 @@ void main() {
         home: Scaffold(
           body: Center(
             child: SizedBox(
-              width: 320,
+              width: 130,
               height: 297,
               child: NotificationListView(
                 notifications: notifications,
@@ -40,6 +40,7 @@ void main() {
     expect(find.text('通知1'), findsOneWidget);
     expect(find.text('通知4'), findsOneWidget);
     expect(find.text('通知5'), findsNothing);
-    expect(find.text('还有 2 条，点击通知按钮查看全部'), findsOneWidget);
+    expect(find.text('还有 2 条，点击查看全部'), findsOneWidget);
+    expect(find.byIcon(Icons.done_all), findsOneWidget);
   });
 }

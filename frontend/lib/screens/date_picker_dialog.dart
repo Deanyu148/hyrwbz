@@ -20,6 +20,7 @@ class _S extends State<DatePickerDialogWidget> {
   late final TextEditingController _ctrl;
   DateTime? _picked;
   late DateTime _displayedMonth;
+  bool _yearDateMode = false;
 
   @override
   void initState() {
@@ -120,6 +121,7 @@ class _S extends State<DatePickerDialogWidget> {
     }
 
     return Column(
+      key: const ValueKey('month-date-picker'),
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
@@ -130,10 +132,22 @@ class _S extends State<DatePickerDialogWidget> {
               icon: const Icon(Icons.chevron_left),
             ),
             Expanded(
-              child: Text(
-                DateFormat('yyyy年MM月').format(_displayedMonth),
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleMedium,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  TextButton(
+                    key: const ValueKey('year-selector'),
+                    onPressed: () => setState(() => _yearDateMode = true),
+                    child: Text(
+                      '${_displayedMonth.year}年',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                  ),
+                  Text(
+                    DateFormat('MM月').format(_displayedMonth),
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ],
               ),
             ),
             IconButton(
@@ -165,6 +179,32 @@ class _S extends State<DatePickerDialogWidget> {
     );
   }
 
+  DateTime get _initialCalendarDate {
+    final candidate = _picked ?? DateTime.now();
+    if (candidate.isBefore(_firstDate)) return _firstDate;
+    if (candidate.isAfter(_lastDate)) return _lastDate;
+    return candidate;
+  }
+
+  Widget _buildYearDatePicker() {
+    return SizedBox(
+      key: const ValueKey('year-date-picker'),
+      height: 360,
+      child: CalendarDatePicker(
+        initialDate: _initialCalendarDate,
+        firstDate: _firstDate,
+        lastDate: _lastDate,
+        initialCalendarMode: DatePickerMode.year,
+        onDateChanged: (date) {
+          Navigator.pop(
+            context,
+            DateFormat('yyyy/MM/dd').format(date),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final availableWidth = MediaQuery.sizeOf(context).width - 48;
@@ -173,49 +213,54 @@ class _S extends State<DatePickerDialogWidget> {
       title: Text(widget.title),
       content: SizedBox(
         width: availableWidth.clamp(280.0, 360.0).toDouble(),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _ctrl,
-                decoration: const InputDecoration(
-                  labelText: 'YYYY/MM/DD',
-                  hintText: '2026/09/01',
-                  suffixIcon: Icon(Icons.calendar_month),
+        child: _yearDateMode
+            ? _buildYearDatePicker()
+            : SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: _ctrl,
+                      decoration: const InputDecoration(
+                        labelText: 'YYYY/MM/DD',
+                        hintText: '2026/09/01',
+                        suffixIcon: Icon(Icons.calendar_month),
+                      ),
+                      onChanged: (value) {
+                        final date = _parseDate(value);
+                        if (date == null ||
+                            date.isBefore(_firstDate) ||
+                            date.isAfter(_lastDate)) {
+                          return;
+                        }
+                        setState(() {
+                          _picked = date;
+                          _displayedMonth = DateTime(date.year, date.month);
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    _buildCalendar(context),
+                  ],
                 ),
-                onChanged: (value) {
-                  final date = _parseDate(value);
-                  if (date == null || date.isBefore(_firstDate) || date.isAfter(_lastDate)) {
-                    return;
-                  }
-                  setState(() {
-                    _picked = date;
-                    _displayedMonth = DateTime(date.year, date.month);
-                  });
-                },
               ),
-              const SizedBox(height: 8),
-              _buildCalendar(context),
-            ],
-          ),
-        ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, null),
           child: const Text('取消'),
         ),
-        FilledButton(
-          onPressed: () {
-            final date = _parseDate(_ctrl.text);
-            Navigator.pop(
-              context,
-              date == null ? null : DateFormat('yyyy/MM/dd').format(date),
-            );
-          },
-          child: const Text('确定'),
-        ),
+        if (!_yearDateMode)
+          FilledButton(
+            onPressed: () {
+              final date = _parseDate(_ctrl.text);
+              Navigator.pop(
+                context,
+                date == null ? null : DateFormat('yyyy/MM/dd').format(date),
+              );
+            },
+            child: const Text('确定'),
+          ),
       ],
     );
   }

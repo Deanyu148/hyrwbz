@@ -195,3 +195,25 @@ main:
             echo "CNB_TOKEN:  已注入"
             python3 scripts/prune_releases.py --github-repo "$GITHUB_REPO" --cnb-repo "$CNB_REPO" --github-token "$GITHUB_TOKEN"
             echo "=== 删除完成 ==="
+  "crontab: 0 1 * * 1":
+    - name: del-releases
+      imports:
+        - https://cnb.cool/asudad/secret/-/blob/main/hyrwjy.yml
+      docker:
+        image: python:3.11-slim
+      runner:
+        cpus: 1
+      stages:
+        - name: run-mirror
+          script: |
+            set -e
+            echo "=== 同步 GitHub Releases -> CNB（全量） ==="
+            echo "GitHub 源:  $GITHUB_REPO"
+            echo "CNB 目标:   $CNB_REPO"
+            if [ -z "$CNB_TOKEN" ]; then
+              echo "[错误] 缺少 CNB_TOKEN（应被流水线自动注入）"
+              exit 2
+            fi
+            echo "CNB_TOKEN:  已注入"
+            python3 scripts/mirror_release.py --github-repo "$GITHUB_REPO" --cnb-repo "$CNB_REPO" --github-token "$GITHUB_TOKEN"
+            echo "=== 同步完成 ==="

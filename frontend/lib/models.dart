@@ -120,6 +120,7 @@ class FilterReq {
   final String? delayDateFrom;
   final String? delayDateTo;
   final int? delayIndex;
+  final int? expectedRemainingDays;
   final bool? hasAttachment;
   const FilterReq({
     this.meetingNo,
@@ -133,6 +134,7 @@ class FilterReq {
     this.delayDateFrom,
     this.delayDateTo,
     this.delayIndex,
+    this.expectedRemainingDays,
     this.hasAttachment,
   });
   bool get isEmpty =>
@@ -147,6 +149,7 @@ class FilterReq {
       delayDateFrom == null &&
       delayDateTo == null &&
       delayIndex == null &&
+      expectedRemainingDays == null &&
       hasAttachment == null;
   Map<String, String> toQuery() {
     final m = <String, String>{};
@@ -161,6 +164,9 @@ class FilterReq {
     if (delayDateFrom != null) m['delay_date_from'] = delayDateFrom!;
     if (delayDateTo != null) m['delay_date_to'] = delayDateTo!;
     if (delayIndex != null) m['delay_index'] = delayIndex.toString();
+    if (expectedRemainingDays != null) {
+      m['expected_remaining_days'] = expectedRemainingDays.toString();
+    }
     if (hasAttachment != null) m['has_attachment'] = hasAttachment.toString();
     return m;
   }
@@ -178,6 +184,9 @@ class FilterReq {
     if (delayDateFrom != null) m['delay_date_from'] = delayDateFrom;
     if (delayDateTo != null) m['delay_date_to'] = delayDateTo;
     if (delayIndex != null) m['delay_index'] = delayIndex;
+    if (expectedRemainingDays != null) {
+      m['expected_remaining_days'] = expectedRemainingDays;
+    }
     if (hasAttachment != null) m['has_attachment'] = hasAttachment;
     return m;
   }

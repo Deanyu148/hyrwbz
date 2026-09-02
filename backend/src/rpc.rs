@@ -72,6 +72,11 @@ struct UpdateAttachmentParam {
     id: i64,
     filename: String,
 }
+#[derive(Debug, Deserialize)]
+struct NotificationHistoryParam {
+    from: Option<String>,
+    to: Option<String>,
+}
 
 pub async fn serve(
     socket_path: &str,
@@ -162,6 +167,11 @@ async fn dispatch_inner(
                 let store = notification_store.ok_or_else(|| service::ServiceError::internal("notification service unavailable"))?;
                 serde_json::to_value(store.list(db).await.map_err(service::ServiceError::internal)?).map_err(service::ServiceError::internal)?
             }
+            "notification.history" => {
+                let store = notification_store.ok_or_else(|| service::ServiceError::internal("notification service unavailable"))?;
+                let param: NotificationHistoryParam = decode(request.params)?;
+                serde_json::to_value(store.history(db, param.from, param.to).await.map_err(service::ServiceError::internal)?).map_err(service::ServiceError::internal)?
+            }
             "notification.mark_read" => {
                 let store = notification_store.ok_or_else(|| service::ServiceError::internal("notification service unavailable"))?;
                 store.mark_read(decode::<IdParam>(request.params)?.id).await.map_err(service::ServiceError::internal)?;
@@ -199,7 +209,9 @@ async fn dispatch_inner(
                 .await
                 .map_err(service::ServiceError::internal);
                 std::fs::remove_file(&path).ok();
-                serde_json::to_value(result?).map_err(service::ServiceError::internal)?
+                let result = result?;
+                reset_notifications_after_import(notification_store, db).await?;
+                serde_json::to_value(result).map_err(service::ServiceError::internal)?
             }
             "import.csv" => {
                 let param: ImportParam = decode(request.params)?;
@@ -212,7 +224,9 @@ async fn dispatch_inner(
                 .await
                 .map_err(service::ServiceError::internal);
                 std::fs::remove_file(&path).ok();
-                serde_json::to_value(result?).map_err(service::ServiceError::internal)?
+                let result = result?;
+                reset_notifications_after_import(notification_store, db).await?;
+                serde_json::to_value(result).map_err(service::ServiceError::internal)?
             }
             "import.database" => {
                 let _: ImportParam = decode(request.params)?;
@@ -220,6 +234,7 @@ async fn dispatch_inner(
                 let result = import_export::import_db_file(db, path.to_string_lossy().as_ref()).await.map_err(service::ServiceError::internal);
                 std::fs::remove_file(&path).ok();
                 result?;
+                reset_notifications_after_import(notification_store, db).await?;
                 json!({"ok": true})
             }
             "import.all_files" => {
@@ -228,6 +243,7 @@ async fn dispatch_inner(
                 let result = import_export::import_all_files(db, path.to_string_lossy().as_ref()).await.map_err(service::ServiceError::internal);
                 std::fs::remove_file(&path).ok();
                 result?;
+                reset_notifications_after_import(notification_store, db).await?;
                 json!({"ok": true})
             }
             "attachment.list" => serde_json::to_value(service::list_attachments(db, decode::<TaskIdParam>(request.params)?.task_id).await?).map_err(service::ServiceError::internal)?,
@@ -253,6 +269,19 @@ async fn dispatch_inner(
         Ok((value, payload)) => success_frame(id, value, payload),
         Err(error) => error_frame(id, error.code, error.message),
     }
+}
+
+async fn reset_notifications_after_import(
+    notification_store: Option<&notifications::NotificationStore>,
+    db: &Db,
+) -> Result<(), service::ServiceError> {
+    if let Some(store) = notification_store {
+        store
+            .reset_after_import(db)
+            .await
+            .map_err(service::ServiceError::internal)?;
+    }
+    Ok(())
 }
 
 fn decode<T: DeserializeOwned>(value: Value) -> Result<T, service::ServiceError> {
