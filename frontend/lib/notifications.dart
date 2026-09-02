@@ -70,10 +70,11 @@ class NotificationListView extends StatelessWidget {
 class CompactNotificationPanel extends StatelessWidget {
   static const double panelScale = 3;
   static const double panelWidth = 130 * panelScale;
-  static const double _headerHeight = 36 * panelScale;
-  static const double _previewItemHeight = 52 * panelScale;
-  static const double _footerHeight = 24 * panelScale;
-  static const double _dividerHeight = panelScale;
+  // 只放大外层面板，标题栏、每个通知条目和底部提示保持原有高度。
+  static const double _headerHeight = 36;
+  static const double _previewItemHeight = 52;
+  static const double _footerHeight = 24;
+  static const double _dividerHeight = 1;
   static const int maxPreviewItems = 2;
 
   static double heightForItemCount(int itemCount) {

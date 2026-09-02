@@ -2,7 +2,7 @@ use crate::db::{self, Db};
 use anyhow::Result;
 use calamine::{open_workbook_auto, Data, Reader};
 use chrono::Local;
-use sqlx::Row;
+use sqlx::{Acquire, Row};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -184,42 +184,45 @@ fn replace_attachments_directory(source: &Path) -> Result<()> {
 }
 
 pub async fn import_db_file(db: &Db, src_path: &str) -> Result<()> {
-    // Use ATTACH/INSERT to safely import while server is running
+    // ATTACH DATABASE is connection-local in SQLite. Keep the attach, reads,
+    // writes, and detach on one acquired connection; using the pool directly
+    // can send each statement to a different connection and silently import
+    // nothing when the attached schema is not visible there.
+    let mut conn = db.acquire().await?;
     let escaped_path = src_path.replace('\'', "''");
     sqlx::query(&format!("ATTACH DATABASE '{}' AS import_src", escaped_path))
-        .execute(db)
+        .execute(&mut *conn)
         .await?;
 
-    for table in &["tasks", "delays", "meta", "snapshots", "attachments"] {
-        // Check if source table exists
-        let count: i64 = sqlx::query_scalar(&format!(
-            "SELECT count(*) FROM import_src.sqlite_master WHERE type='table' AND name='{}'",
-            table
-        ))
-        .fetch_one(db)
-        .await
-        .unwrap_or(0);
-        if count == 0 {
-            continue;
-        }
+    let import_result = async {
+        let mut tx = conn.begin().await?;
+        for table in &["tasks", "delays", "meta", "snapshots", "attachments"] {
+            let count: i64 = sqlx::query_scalar(&format!(
+                "SELECT count(*) FROM import_src.sqlite_master WHERE type='table' AND name='{}'",
+                table
+            ))
+            .fetch_one(&mut *tx)
+            .await?;
+            if count == 0 {
+                continue;
+            }
 
-        let mut tx = db.begin().await?;
-        let del = format!("DELETE FROM {}", table);
-        if let Err(e) = sqlx::query(&del).execute(&mut *tx).await {
-            tx.rollback().await?;
-            eprintln!("delete {}: {}", table, e);
-            continue;
-        }
-        let ins = format!("INSERT INTO {} SELECT * FROM import_src.{}", table, table);
-        if let Err(e) = sqlx::query(&ins).execute(&mut *tx).await {
-            tx.rollback().await?;
-            eprintln!("import {}: {}", table, e);
-            continue;
+            let del = format!("DELETE FROM {}", table);
+            sqlx::query(&del).execute(&mut *tx).await?;
+            let ins = format!("INSERT INTO {} SELECT * FROM import_src.{}", table, table);
+            sqlx::query(&ins).execute(&mut *tx).await?;
         }
         tx.commit().await?;
+        Ok::<(), anyhow::Error>(())
     }
+    .await;
 
-    let _ = sqlx::query("DETACH DATABASE import_src").execute(db).await;
+    // The transaction is committed or dropped before DETACH is attempted.
+    let detach_result = sqlx::query("DETACH DATABASE import_src")
+        .execute(&mut *conn)
+        .await;
+    import_result?;
+    detach_result?;
     Ok(())
 }
 
@@ -681,6 +684,44 @@ mod tests {
             writer.write_record(row).unwrap();
         }
         writer.flush().unwrap();
+    }
+
+    #[tokio::test]
+    async fn database_import_reads_attached_database_on_one_connection() {
+        let (target, target_path) = test_db("target_pool").await;
+        let (source, source_path) = test_db("source_pool").await;
+
+        sqlx::query(
+            "INSERT INTO tasks (meeting_no, task_no, task_desc, dept, owner, required_date, actual_date, remark)
+             VALUES ('旧数据', 1, '旧任务', '', '', '', '进行中', '')",
+        )
+        .execute(&target)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO tasks (meeting_no, task_no, task_desc, dept, owner, required_date, actual_date, remark)
+             VALUES ('导入数据', 2, '导入任务', '部门', '责任人', '', '进行中', '')",
+        )
+        .execute(&source)
+        .await
+        .unwrap();
+        drop(source);
+
+        import_db_file(&target, source_path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT meeting_no, task_desc FROM tasks ORDER BY id",
+        )
+        .fetch_all(&target)
+        .await
+        .unwrap();
+        assert_eq!(rows, vec![("导入数据".to_string(), "导入任务".to_string())]);
+
+        drop(target);
+        fs::remove_file(target_path).ok();
+        fs::remove_file(source_path).ok();
     }
 
     #[test]
