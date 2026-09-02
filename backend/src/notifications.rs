@@ -5,6 +5,7 @@ use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use serde::Serialize;
 use sqlx::{Pool, Row, Sqlite};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -105,15 +106,24 @@ impl NotificationStore {
         let _guard = self.refresh_lock.lock().await;
         let today = Local::now().date_naive();
         // 始终扫描核心数据库中的全部任务，不受主界面当前筛选条件影响。
-        let tasks = service::list_tasks(core_db, &FilterReq::default())
+        let mut tasks = service::list_tasks(core_db, &FilterReq::default())
             .await
             .map_err(|error| anyhow::anyhow!(error.message))?;
+        sort_tasks_for_sequence(&mut tasks);
+        let sequence_by_task_id: HashMap<i64, i64> = tasks
+            .iter()
+            .enumerate()
+            .map(|(index, task)| (task.id, index as i64 + 1))
+            .collect();
         let mut tx = self.db.begin().await?;
         sqlx::query("DELETE FROM notifications")
             .execute(&mut *tx)
             .await?;
-        for task in tasks {
-            let Some((expected_date, remaining_days, message)) = build_notification(&task, today) else {
+        for (index, task) in tasks.into_iter().enumerate() {
+            let sequence_no = index as i64 + 1;
+            let Some((expected_date, remaining_days, message)) =
+                build_notification(&task, sequence_no, today)
+            else {
                 continue;
             };
             let notification_date = today.format("%Y-%m-%d").to_string();
@@ -194,6 +204,27 @@ impl NotificationStore {
             .execute(&mut *tx)
             .await?;
         }
+        // 历史通知也使用主表第一栏的当前序号；同时修正旧版本按任务序号生成的前缀。
+        let history_rows = sqlx::query("SELECT id, task_id, message FROM notification_history")
+            .fetch_all(&mut *tx)
+            .await?;
+        for row in history_rows {
+            let task_id: i64 = row.try_get("task_id")?;
+            let Some(sequence_no) = sequence_by_task_id.get(&task_id) else {
+                continue;
+            };
+            let id: i64 = row.try_get("id")?;
+            let old_message: String = row.try_get("message")?;
+            let message = with_sequence_prefix(*sequence_no, &old_message);
+            if message != old_message {
+                sqlx::query("UPDATE notification_history SET message = ?1 WHERE id = ?2")
+                    .bind(message)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+
         sqlx::query("DELETE FROM notification_read_state WHERE notification_date <> ?1")
             .bind(today.format("%Y-%m-%d").to_string())
             .execute(&mut *tx)
@@ -401,7 +432,53 @@ fn row_to_notification(row: sqlx::sqlite::SqliteRow) -> Notification {
     }
 }
 
-fn build_notification(task: &Task, today: NaiveDate) -> Option<(String, i64, String)> {
+fn sort_tasks_for_sequence(tasks: &mut [Task]) {
+    tasks.sort_by(|left, right| {
+        compare_meeting_no(&left.meeting_no, &right.meeting_no)
+            .then_with(|| left.task_no.cmp(&right.task_no))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+}
+
+fn compare_meeting_no(left: &str, right: &str) -> std::cmp::Ordering {
+    match (meeting_no_key(left), meeting_no_key(right)) {
+        (Some((left_prefix, left_year, left_number)), Some((right_prefix, right_year, right_number))) => {
+            left_prefix
+                .cmp(right_prefix)
+                .then_with(|| left_year.cmp(&right_year))
+                .then_with(|| left_number.cmp(&right_number))
+        }
+        _ => left.cmp(right),
+    }
+}
+
+fn meeting_no_key(value: &str) -> Option<(&str, i64, i64)> {
+    let (prefix, after_open) = value.trim().split_once('〔')?;
+    let (year, after_close) = after_open.split_once('〕')?;
+    let number = after_close.strip_suffix('号')?;
+    Some((prefix, year.parse().ok()?, number.parse().ok()?))
+}
+
+fn with_sequence_prefix(sequence_no: i64, message: &str) -> String {
+    let body = strip_sequence_prefix(message);
+    format!("序号“{}”，{}", sequence_no, body)
+}
+
+fn strip_sequence_prefix(message: &str) -> &str {
+    let Some(rest) = message.strip_prefix("序号“") else {
+        return message;
+    };
+    let Some(end) = rest.find("”，") else {
+        return message;
+    };
+    &rest[end + "”，".len()..]
+}
+
+fn build_notification(
+    task: &Task,
+    sequence_no: i64,
+    today: NaiveDate,
+) -> Option<(String, i64, String)> {
     if !task.actual_date.trim().is_empty() && task.actual_date.trim() != "进行中" {
         return None;
     }
@@ -418,7 +495,7 @@ fn build_notification(task: &Task, today: NaiveDate) -> Option<(String, i64, Str
     if remaining_days >= 7 {
         return None;
     }
-    let message = if remaining_days == 0 {
+    let body = if remaining_days == 0 {
         format!(
             "第{}中，第{}号任务，已经到达期望完成日期，请检查相关事宜。",
             task.meeting_no, task.task_no
@@ -436,7 +513,11 @@ fn build_notification(task: &Task, today: NaiveDate) -> Option<(String, i64, Str
             task.meeting_no, task.task_no, remaining_days
         )
     };
-    Some((expected.to_string(), remaining_days, message))
+    Some((
+        expected.to_string(),
+        remaining_days,
+        with_sequence_prefix(sequence_no, &body),
+    ))
 }
 
 fn notification_db_path() -> String {
@@ -488,6 +569,7 @@ mod tests {
         let today = NaiveDate::from_ymd_opt(2026, 9, 2).unwrap();
         let notification = build_notification(
             &task("进行中", "2026/09/20", "2026/09/02"),
+            7,
             today,
         )
         .unwrap();
@@ -495,22 +577,55 @@ mod tests {
         assert_eq!(notification.1, 0);
         assert_eq!(
             notification.2,
-            "第纪要〔2026〕1号中，第2号任务，已经到达期望完成日期，请检查相关事宜。"
+            "序号“7”，第纪要〔2026〕1号中，第2号任务，已经到达期望完成日期，请检查相关事宜。"
         );
 
-        let overdue = build_notification(&task("进行中", "2026/09/01", ""), today).unwrap();
+        let overdue =
+            build_notification(&task("进行中", "2026/09/01", ""), 7, today).unwrap();
         assert_eq!(overdue.1, -1);
         assert_eq!(
             overdue.2,
-            "第纪要〔2026〕1号中，第2号任务，已经超过期望完成日期1天。"
+            "序号“7”，第纪要〔2026〕1号中，第2号任务，已经超过期望完成日期1天。"
         );
 
-        let upcoming = build_notification(&task("进行中", "2026/09/07", ""), today).unwrap();
+        let upcoming =
+            build_notification(&task("进行中", "2026/09/07", ""), 7, today).unwrap();
         assert_eq!(upcoming.1, 5);
         assert_eq!(
             upcoming.2,
-            "第纪要〔2026〕1号中，第2号任务，距期望完成时间5天。"
+            "序号“7”，第纪要〔2026〕1号中，第2号任务，距期望完成时间5天。"
         );
+    }
+
+    #[test]
+    fn sequence_prefix_replaces_old_task_number_prefix() {
+        assert_eq!(
+            with_sequence_prefix(7, "序号“2”，原通知正文"),
+            "序号“7”，原通知正文"
+        );
+        assert_eq!(
+            with_sequence_prefix(7, "原通知正文"),
+            "序号“7”，原通知正文"
+        );
+    }
+
+    #[test]
+    fn task_sequence_uses_main_table_meeting_order() {
+        let mut tasks = vec![
+            Task {
+                meeting_no: "纪要〔2026〕10号".to_string(),
+                id: 10,
+                ..task("进行中", "2026/09/02", "")
+            },
+            Task {
+                meeting_no: "纪要〔2026〕2号".to_string(),
+                id: 2,
+                ..task("进行中", "2026/09/02", "")
+            },
+        ];
+        sort_tasks_for_sequence(&mut tasks);
+        assert_eq!(tasks[0].meeting_no, "纪要〔2026〕2号");
+        assert_eq!(tasks[1].meeting_no, "纪要〔2026〕10号");
     }
 
     #[test]
@@ -525,8 +640,10 @@ mod tests {
     #[test]
     fn notification_skips_completed_or_far_future_tasks() {
         let today = NaiveDate::from_ymd_opt(2026, 9, 2).unwrap();
-        assert!(build_notification(&task("2026/09/01", "2026/09/01", ""), today).is_none());
-        assert!(build_notification(&task("进行中", "2026/09/09", ""), today).is_none());
+        assert!(
+            build_notification(&task("2026/09/01", "2026/09/01", ""), 1, today).is_none()
+        );
+        assert!(build_notification(&task("进行中", "2026/09/09", ""), 1, today).is_none());
     }
     #[tokio::test]
     async fn read_state_changes_only_on_item_click_and_import_resets_to_unread() {

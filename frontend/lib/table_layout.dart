@@ -126,8 +126,10 @@ List<double> fitTaskColumnWidths(
   return _finishTotal(fitted, usable);
 }
 
-/// 拖动第 [dividerIndex] 个分隔线，调整它左右两列的宽度。
-/// 返回值始终保持总宽度不变，并限制左右列不小于当前窗口允许的最小值。
+/// 拖动第 [dividerIndex] 个分隔线时，只调整该分隔线左侧栏目。
+///
+/// 为保持表格总宽度与窗口一致，所有宽度差额统一由最后的“备注”栏吸收；
+/// 分隔线右侧的相邻栏目以及其他普通栏目宽度均保持不变。
 List<double> resizeTaskColumnWidths(
   List<double> currentWidths,
   int dividerIndex,
@@ -135,17 +137,18 @@ List<double> resizeTaskColumnWidths(
   double availableWidth,
 ) {
   final fitted = fitTaskColumnWidths(availableWidth, currentWidths);
-  if (dividerIndex < 0 || dividerIndex >= taskColumnCount - 1) return fitted;
+  final remarkIndex = taskColumnCount - 1;
+  if (dividerIndex < 0 || dividerIndex >= remarkIndex) return fitted;
 
   final minimums = _minimumsForUsableWidth(_usableTaskWidth(availableWidth));
-  final left = fitted[dividerIndex];
-  final right = fitted[dividerIndex + 1];
-  final minimumDelta = minimums[dividerIndex] - left;
-  final maximumDelta = right - minimums[dividerIndex + 1];
+  final columnWidth = fitted[dividerIndex];
+  final remarkWidth = fitted[remarkIndex];
+  final minimumDelta = minimums[dividerIndex] - columnWidth;
+  final maximumDelta = remarkWidth - minimums[remarkIndex];
   final applied = delta.clamp(minimumDelta, maximumDelta).toDouble();
 
   final resized = List<double>.from(fitted);
-  resized[dividerIndex] = left + applied;
-  resized[dividerIndex + 1] = right - applied;
+  resized[dividerIndex] = columnWidth + applied;
+  resized[remarkIndex] = remarkWidth - applied;
   return _finishTotal(resized, _usableTaskWidth(availableWidth));
 }

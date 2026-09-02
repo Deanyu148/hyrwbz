@@ -28,30 +28,48 @@ void main() {
     expect(wide.last - base.last, closeTo(300, 0.001));
   });
 
-  test('dragging a divider resizes adjacent columns without changing total width', () {
-    const width = 1200.0;
+  test('dragging changes only the selected column and the remark column', () {
+    const width = 1600.0;
     final original = computeTaskColumnWidths(width);
     final resized = resizeTaskColumnWidths(original, 3, 25, width);
 
     expect(resized[3] - original[3], closeTo(25, 0.001));
-    expect(original[4] - resized[4], closeTo(25, 0.001));
+    expect(original.last - resized.last, closeTo(25, 0.001));
     for (var i = 0; i < resized.length; i++) {
-      if (i != 3 && i != 4) expect(resized[i], closeTo(original[i], 0.001));
+      if (i != 3 && i != taskColumnCount - 1) {
+        expect(resized[i], closeTo(original[i], 0.001));
+      }
     }
     expectFillsWidth(resized, width);
   });
 
-  test('dragging stops when the neighboring column reaches its minimum width', () {
-    const width = 1200.0;
+  test('dragging wider stops when the remark column reaches its minimum width', () {
+    const width = 1600.0;
     final original = computeTaskColumnWidths(width);
     final resized = resizeTaskColumnWidths(original, 0, 10000, width);
 
-    expect(resized[1], closeTo(taskAllMinColumnWidths[1], 0.001));
+    expect(resized.last, closeTo(taskAllMinColumnWidths.last, 0.001));
+    expect(resized[1], closeTo(original[1], 0.001));
+    expectFillsWidth(resized, width);
+  });
+
+  test('dragging narrower grows only the remark column', () {
+    const width = 1600.0;
+    final original = computeTaskColumnWidths(width);
+    final resized = resizeTaskColumnWidths(original, 5, -20, width);
+
+    expect(original[5] - resized[5], closeTo(20, 0.001));
+    expect(resized.last - original.last, closeTo(20, 0.001));
+    for (var i = 0; i < resized.length; i++) {
+      if (i != 5 && i != taskColumnCount - 1) {
+        expect(resized[i], closeTo(original[i], 0.001));
+      }
+    }
     expectFillsWidth(resized, width);
   });
 
   test('custom widths are restored exactly at the same window width', () {
-    const width = 1200.0;
+    const width = 1600.0;
     final original = computeTaskColumnWidths(width);
     final custom = resizeTaskColumnWidths(original, 5, 20, width);
     final restored = fitTaskColumnWidths(width, custom);
