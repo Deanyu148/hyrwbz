@@ -10,6 +10,10 @@ import 'screens/date_picker_dialog.dart';
 const _notificationRefreshInterval = Duration(seconds: 30);
 
 class NotificationListView extends StatelessWidget {
+  static const double bodyFontSize = 16;
+  static const double bodyLineHeight = 1.4;
+  static const double _verticalPadding = bodyFontSize * bodyLineHeight / 2;
+
   final List<NotificationItem> notifications;
   final Future<void> Function(NotificationItem item) onTap;
 
@@ -33,18 +37,21 @@ class NotificationListView extends StatelessWidget {
         return Tooltip(
           message: '点击查看详情',
           child: InkWell(
+            key: ValueKey('full-notification-${item.id}'),
             onTap: () => onTap(item),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: _verticalPadding,
+              ),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   SizedBox(
                     width: 16,
                     child: item.isRead
                         ? null
-                        : Padding(
-                            padding: const EdgeInsets.only(top: 6),
+                        : Center(
                             child: Container(
                               width: 8,
                               height: 8,
@@ -55,7 +62,16 @@ class NotificationListView extends StatelessWidget {
                             ),
                           ),
                   ),
-                  Expanded(child: Text(item.message)),
+                  Expanded(
+                    child: Text(
+                      item.message,
+                      textAlign: TextAlign.left,
+                      style: const TextStyle(
+                        fontSize: bodyFontSize,
+                        height: bodyLineHeight,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -70,9 +86,11 @@ class NotificationListView extends StatelessWidget {
 class CompactNotificationPanel extends StatelessWidget {
   static const double panelScale = 3;
   static const double panelWidth = 130 * panelScale;
-  // 只放大外层面板，标题栏、每个通知条目和底部提示保持原有高度。
+  static const double bodyFontSize = 14;
+  static const double bodyLineHeight = 1.4;
+  static const double _bodyVerticalPadding = bodyFontSize * bodyLineHeight / 2;
+  // 只放大外层面板，标题栏和底部提示保持原有高度。
   static const double _headerHeight = 36;
-  static const double _previewItemHeight = 52;
   static const double _footerHeight = 24;
   static const double _dividerHeight = 1;
   static const int maxPreviewItems = 2;
@@ -149,51 +167,60 @@ class CompactNotificationPanel extends StatelessWidget {
             ),
           )
         else
-          for (final item in visible)
-            SizedBox(
-              height: _previewItemHeight,
-              child: Tooltip(
-                message: '点击查看详情',
-                child: InkWell(
-                  onTap: () => onTap(item),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 5,
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(
-                          width: 10,
-                          child: item.isRead
-                              ? null
-                              : Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Container(
-                                    width: 6,
-                                    height: 6,
-                                    decoration: const BoxDecoration(
-                                      color: Colors.red,
-                                      shape: BoxShape.circle,
+          Expanded(
+            child: ListView.separated(
+              padding: EdgeInsets.zero,
+              itemCount: visible.length,
+              separatorBuilder: (_, __) =>
+                  const Divider(height: _dividerHeight),
+              itemBuilder: (context, index) {
+                final item = visible[index];
+                return Tooltip(
+                  message: '点击查看详情',
+                  child: InkWell(
+                    key: ValueKey('compact-notification-${item.id}'),
+                    onTap: () => onTap(item),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: _bodyVerticalPadding,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 10,
+                            child: item.isRead
+                                ? null
+                                : Center(
+                                    child: Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: const BoxDecoration(
+                                        color: Colors.red,
+                                        shape: BoxShape.circle,
+                                      ),
                                     ),
                                   ),
-                                ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            item.message,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12),
                           ),
-                        ),
-                      ],
+                          Expanded(
+                            child: Text(
+                              item.message,
+                              textAlign: TextAlign.left,
+                              style: const TextStyle(
+                                fontSize: bodyFontSize,
+                                height: bodyLineHeight,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
+          ),
         if (hiddenCount > 0) ...[
           const Divider(height: _dividerHeight),
           SizedBox(
