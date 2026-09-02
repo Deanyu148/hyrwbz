@@ -1,5 +1,7 @@
 use crate::db::Db;
-use crate::models::{CreateDelayReq, FilterReq, SetLockedMeetingReq, UpdateTaskReq};
+use crate::models::{
+    CreateDelayReq, CreateSnapshotReq, FilterReq, SetLockedMeetingReq, UpdateTaskReq,
+};
 use crate::{excel, import_export, notifications, search_index, service};
 use interprocess::local_socket::tokio::Stream;
 use interprocess::local_socket::traits::tokio::Listener as _;
@@ -225,8 +227,22 @@ async fn dispatch_inner(
                 store.mark_all_read().await.map_err(service::ServiceError::internal)?;
                 json!({"ok": true})
             }
-            "snapshot.create" => json!({"snapshot_id": import_export::create_snapshot(db).await.map_err(service::ServiceError::internal)?}),
+            "snapshot.create" => {
+                let param: CreateSnapshotReq = decode(request.params)?;
+                serde_json::to_value(
+                    import_export::create_snapshot(db, param.remark)
+                        .await
+                        .map_err(service::ServiceError::internal)?,
+                )
+                .map_err(service::ServiceError::internal)?
+            }
             "snapshot.list" => serde_json::to_value(import_export::list_snapshots(db).await.map_err(service::ServiceError::internal)?).map_err(service::ServiceError::internal)?,
+            "snapshot.get" => serde_json::to_value(
+                import_export::get_snapshot(db, decode::<IdParam>(request.params)?.id)
+                    .await
+                    .map_err(service::ServiceError::internal)?,
+            )
+            .map_err(service::ServiceError::internal)?,
             "export.excel" => {
                 let param: ExportParam = decode(request.params)?;
                 serde_json::to_value(excel::export(db, param.filter, param.out_dir).await.map_err(service::ServiceError::internal)?).map_err(service::ServiceError::internal)?
@@ -576,6 +592,54 @@ mod tests {
 
         let _ = service::delete_attachment(&db, attachment_id).await;
         drop(db);
+        std::fs::remove_file(db_path).ok();
+    }
+
+    #[tokio::test]
+    async fn snapshot_rpc_stores_remark_usage_and_read_only_payload() {
+        let unique = uuid::Uuid::new_v4();
+        let db_path = std::env::temp_dir().join(format!("hyrwbz_rpc_snapshot_{unique}.db"));
+        let db = crate::db::init(db_path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO tasks
+             (meeting_no, task_no, task_desc, dept, owner, required_date, actual_date, remark)
+             VALUES ('纪要〔2026〕1号', 1, '历史任务', '', '', '', '进行中', '')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let created = dispatch(
+            &db,
+            RequestHeader {
+                id: 10,
+                method: "snapshot.create".to_string(),
+                params: json!({"remark": "保存前检查"}),
+            },
+            Vec::new(),
+        )
+        .await;
+        let snapshot_id = created.header["result"]["snapshot_id"]
+            .as_i64()
+            .unwrap();
+        assert_eq!(created.header["result"]["used_count"], 1);
+
+        let detail = dispatch(
+            &db,
+            RequestHeader {
+                id: 11,
+                method: "snapshot.get".to_string(),
+                params: json!({"id": snapshot_id}),
+            },
+            Vec::new(),
+        )
+        .await;
+        assert_eq!(detail.header["result"]["remark"], "保存前检查");
+        assert_eq!(detail.header["result"]["tasks"][0]["task_desc"], "历史任务");
+
+        db.close().await;
         std::fs::remove_file(db_path).ok();
     }
 

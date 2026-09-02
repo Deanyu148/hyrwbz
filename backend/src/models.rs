@@ -86,10 +86,30 @@ pub struct FilterReq {
     pub has_attachment: Option<bool>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CreateSnapshotReq {
+    pub remark: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SnapshotInfo {
     pub snapshot_id: i64,
     pub saved_at: String,
+    pub remark: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SnapshotCreateResult {
+    pub snapshot_id: i64,
+    pub used_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SnapshotDetail {
+    pub snapshot_id: i64,
+    pub saved_at: String,
+    pub remark: String,
+    pub tasks: Vec<Task>,
 }
 
 #[derive(Debug, Clone, Serialize)]

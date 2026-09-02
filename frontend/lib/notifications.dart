@@ -88,6 +88,7 @@ class NotificationListView extends StatelessWidget {
 
 /// 仅供鼠标悬停预览使用的紧凑面板，与完整通知界面完全独立。
 class CompactNotificationPanel extends StatelessWidget {
+  static const IconData markAllReadIcon = Icons.done_all_rounded;
   static const double panelScale = 3;
   static const double panelWidth = 130 * panelScale;
   static const double bodyFontSize = 14;
@@ -153,7 +154,7 @@ class CompactNotificationPanel extends StatelessWidget {
                     onPressed: notifications.any((item) => !item.isRead)
                         ? onMarkAllRead
                         : null,
-                    icon: const Icon(Icons.done_all_rounded, size: 17),
+                    icon: const Icon(markAllReadIcon, size: 17),
                   ),
                 ],
               ),
@@ -339,9 +340,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
             icon: const Icon(Icons.history),
             label: const Text('历史通知'),
           ),
-          TextButton(
+          TextButton.icon(
             onPressed: hasUnread ? _markAllRead : null,
-            child: const Text('全部已读'),
+            icon: const Icon(CompactNotificationPanel.markAllReadIcon),
+            label: const Text('全部已读'),
           ),
         ],
       ),

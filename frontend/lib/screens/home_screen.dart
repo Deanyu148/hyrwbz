@@ -17,6 +17,7 @@ import '../task_sort.dart';
 import 'edit_screen.dart';
 import 'delay_screen.dart';
 import 'filter_screen.dart';
+import 'snapshot_screen.dart';
 import 'date_picker_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -428,12 +429,117 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _saveSnapshot() async {
+    final controller = TextEditingController();
+    final request = await showDialog<_SnapshotSaveRequest>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const AppSectionTitle(
+          icon: Icons.save_as_rounded,
+          title: '保存历史快照',
+          subtitle: '保存当前全部任务及延期数据',
+        ),
+        content: SizedBox(
+          width: 460,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLines: 3,
+            minLines: 1,
+            decoration: const InputDecoration(
+              labelText: '备注（可选）',
+              hintText: '可填写本次快照的用途或说明，默认不填写',
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              _SnapshotSaveRequest(controller.text.trim()),
+            ),
+            icon: const Icon(Icons.save_rounded),
+            label: const Text('保存快照'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (request == null) return;
     try {
-      await Api.createSnapshot();
-      _toast('历史快照已保存（最多保留 5 份）');
-    } catch (e) {
-      _toast('保存快照失败: $e');
+      final result = await Api.createSnapshot(
+        request.remark.isEmpty ? null : request.remark,
+      );
+      if (!mounted) return;
+      _toast(snapshotSavedMessage(result.usedCount));
+    } catch (error) {
+      if (mounted) _toast('保存快照失败: $error');
     }
+  }
+
+  Future<void> _viewSnapshots() async {
+    List<SnapshotInfo> snapshots;
+    try {
+      snapshots = await Api.listSnapshots();
+    } catch (error) {
+      if (mounted) _toast('加载历史快照失败: $error');
+      return;
+    }
+    if (!mounted) return;
+    if (snapshots.isEmpty) {
+      _toast('暂无历史快照（当前已经使用0份）');
+      return;
+    }
+    final selected = await showDialog<SnapshotInfo>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const AppSectionTitle(
+          icon: Icons.history_rounded,
+          title: '选择历史快照',
+          subtitle: '点击一份快照进入只读查看界面',
+        ),
+        content: SizedBox(
+          width: 560,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 420),
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: snapshots.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final snapshot = snapshots[index];
+                return ListTile(
+                  leading: CircleAvatar(child: Text('${index + 1}')),
+                  title: Text(snapshot.savedAt),
+                  subtitle: Text(
+                    snapshot.remark.trim().isEmpty ? '无备注' : snapshot.remark,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.pop(dialogContext, snapshot),
+                );
+              },
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+    if (selected == null || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SnapshotScreen(snapshot: selected),
+      ),
+    );
   }
 
   Future<void> _exportDb() async {
@@ -822,7 +928,22 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _reload, tooltip: '刷新'),
           IconButton(icon: const Icon(Icons.filter_alt), onPressed: _openFilter, tooltip: '统计筛选'),
-          IconButton(icon: const Icon(Icons.history), onPressed: _saveSnapshot, tooltip: '保存历史快照'),
+          _ClickMenuButton(
+            icon: Icons.history_rounded,
+            tooltip: '历史快照',
+            items: [
+              _MenuEntry(
+                icon: Icons.save_as_rounded,
+                label: '保存历史快照',
+                onTap: _saveSnapshot,
+              ),
+              _MenuEntry(
+                icon: Icons.manage_history_rounded,
+                label: '查看历史快照',
+                onTap: _viewSnapshots,
+              ),
+            ],
+          ),
           _ClickMenuButton(
             icon: Icons.file_download,
             tooltip: '导出',
@@ -1229,6 +1350,11 @@ class _ViewTaskDialog extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SnapshotSaveRequest {
+  final String remark;
+  const _SnapshotSaveRequest(this.remark);
 }
 
 /// 菜单项数据

@@ -209,8 +209,26 @@ pub async fn import_db_file(db: &Db, src_path: &str) -> Result<()> {
 
             let del = format!("DELETE FROM {}", table);
             sqlx::query(&del).execute(&mut *tx).await?;
-            let ins = format!("INSERT INTO {} SELECT * FROM import_src.{}", table, table);
-            sqlx::query(&ins).execute(&mut *tx).await?;
+            if *table == "snapshots" {
+                let source_columns = sqlx::query("PRAGMA import_src.table_info(snapshots)")
+                    .fetch_all(&mut *tx)
+                    .await?;
+                let has_remark = source_columns.iter().any(|row| {
+                    row.try_get::<String, _>("name")
+                        .is_ok_and(|name| name == "remark")
+                });
+                let insert = if has_remark {
+                    "INSERT INTO snapshots (snapshot_id, saved_at, remark, payload)
+                     SELECT snapshot_id, saved_at, remark, payload FROM import_src.snapshots"
+                } else {
+                    "INSERT INTO snapshots (snapshot_id, saved_at, remark, payload)
+                     SELECT snapshot_id, saved_at, '', payload FROM import_src.snapshots"
+                };
+                sqlx::query(insert).execute(&mut *tx).await?;
+            } else {
+                let ins = format!("INSERT INTO {} SELECT * FROM import_src.{}", table, table);
+                sqlx::query(&ins).execute(&mut *tx).await?;
+            }
         }
         tx.commit().await?;
         Ok::<(), anyhow::Error>(())
@@ -226,42 +244,77 @@ pub async fn import_db_file(db: &Db, src_path: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn create_snapshot(db: &Db) -> Result<i64> {
+pub async fn create_snapshot(
+    db: &Db,
+    remark: Option<String>,
+) -> Result<crate::models::SnapshotCreateResult> {
     let tasks = crate::service::list_tasks(db, &crate::models::FilterReq::default())
         .await
-        .map_err(|e| anyhow::anyhow!("{}", e.message))?;
+        .map_err(|error| anyhow::anyhow!("{}", error.message))?;
     let payload = serde_json::to_string(&tasks)?;
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let res = sqlx::query("INSERT INTO snapshots (saved_at, payload) VALUES (?1, ?2)")
-        .bind(&now)
-        .bind(&payload)
-        .execute(db)
-        .await?;
-    let id = res.last_insert_rowid();
-    // 保留 5 份，删除最早的
+    let remark = remark.unwrap_or_default().trim().to_string();
+    let mut tx = db.begin().await?;
+    let result = sqlx::query(
+        "INSERT INTO snapshots (saved_at, remark, payload) VALUES (?1, ?2, ?3)",
+    )
+    .bind(&now)
+    .bind(&remark)
+    .bind(&payload)
+    .execute(&mut *tx)
+    .await?;
+    let snapshot_id = result.last_insert_rowid();
     sqlx::query(
         "DELETE FROM snapshots WHERE snapshot_id NOT IN (
             SELECT snapshot_id FROM snapshots ORDER BY snapshot_id DESC LIMIT 5
         )",
     )
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
-    Ok(id)
+    let used_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM snapshots")
+        .fetch_one(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(crate::models::SnapshotCreateResult {
+        snapshot_id,
+        used_count,
+    })
 }
 
 pub async fn list_snapshots(db: &Db) -> Result<Vec<crate::models::SnapshotInfo>> {
     let rows = sqlx::query(
-        "SELECT snapshot_id, saved_at FROM snapshots ORDER BY snapshot_id DESC LIMIT 5",
+        "SELECT snapshot_id, saved_at, remark
+         FROM snapshots ORDER BY snapshot_id DESC LIMIT 5",
     )
     .fetch_all(db)
     .await?;
     Ok(rows
         .iter()
-        .map(|r| crate::models::SnapshotInfo {
-            snapshot_id: r.try_get("snapshot_id").unwrap_or_default(),
-            saved_at: r.try_get("saved_at").unwrap_or_default(),
+        .map(|row| crate::models::SnapshotInfo {
+            snapshot_id: row.try_get("snapshot_id").unwrap_or_default(),
+            saved_at: row.try_get("saved_at").unwrap_or_default(),
+            remark: row.try_get("remark").unwrap_or_default(),
         })
         .collect())
+}
+
+pub async fn get_snapshot(db: &Db, snapshot_id: i64) -> Result<crate::models::SnapshotDetail> {
+    let row = sqlx::query(
+        "SELECT snapshot_id, saved_at, remark, payload
+         FROM snapshots WHERE snapshot_id = ?1",
+    )
+    .bind(snapshot_id)
+    .fetch_optional(db)
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("历史快照不存在"))?;
+    let payload: String = row.try_get("payload")?;
+    let tasks = serde_json::from_str(&payload)?;
+    Ok(crate::models::SnapshotDetail {
+        snapshot_id: row.try_get("snapshot_id")?,
+        saved_at: row.try_get("saved_at")?,
+        remark: row.try_get("remark").unwrap_or_default(),
+        tasks,
+    })
 }
 
 fn default_export_dir() -> PathBuf {
@@ -684,6 +737,40 @@ mod tests {
             writer.write_record(row).unwrap();
         }
         writer.flush().unwrap();
+    }
+
+    #[tokio::test]
+    async fn snapshots_store_optional_remark_and_keep_five_entries() {
+        let (db, db_path) = test_db("snapshot_remark").await;
+        sqlx::query(
+            "INSERT INTO tasks
+             (meeting_no, task_no, task_desc, dept, owner, required_date, actual_date, remark)
+             VALUES ('纪要〔2026〕1号', 1, '快照任务', '', '', '', '进行中', '')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        for index in 1i64..=6 {
+            let result = create_snapshot(&db, Some(format!("备注{index}")))
+                .await
+                .unwrap();
+            assert_eq!(result.used_count, index.min(5));
+        }
+        let snapshots = list_snapshots(&db).await.unwrap();
+        assert_eq!(snapshots.len(), 5);
+        assert_eq!(snapshots.first().unwrap().remark, "备注6");
+        assert_eq!(snapshots.last().unwrap().remark, "备注2");
+
+        let detail = get_snapshot(&db, snapshots.first().unwrap().snapshot_id)
+            .await
+            .unwrap();
+        assert_eq!(detail.remark, "备注6");
+        assert_eq!(detail.tasks.len(), 1);
+        assert_eq!(detail.tasks[0].task_desc, "快照任务");
+
+        db.close().await;
+        fs::remove_file(db_path).ok();
     }
 
     #[tokio::test]

@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS snapshots (
     snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
     saved_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    remark      TEXT    NOT NULL DEFAULT '',
     payload     TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_saved_at ON snapshots(saved_at);

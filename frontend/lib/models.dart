@@ -108,6 +108,64 @@ class Task {
       };
 }
 
+
+class SnapshotInfo {
+  final int snapshotId;
+  final String savedAt;
+  final String remark;
+
+  const SnapshotInfo({
+    required this.snapshotId,
+    required this.savedAt,
+    required this.remark,
+  });
+
+  factory SnapshotInfo.fromJson(Map<String, dynamic> json) => SnapshotInfo(
+        snapshotId: (json['snapshot_id'] as num).toInt(),
+        savedAt: json['saved_at'] as String? ?? '',
+        remark: json['remark'] as String? ?? '',
+      );
+}
+
+class SnapshotCreateResult {
+  final int snapshotId;
+  final int usedCount;
+
+  const SnapshotCreateResult({
+    required this.snapshotId,
+    required this.usedCount,
+  });
+
+  factory SnapshotCreateResult.fromJson(Map<String, dynamic> json) =>
+      SnapshotCreateResult(
+        snapshotId: (json['snapshot_id'] as num).toInt(),
+        usedCount: (json['used_count'] as num).toInt(),
+      );
+}
+
+class SnapshotDetail {
+  final int snapshotId;
+  final String savedAt;
+  final String remark;
+  final List<Task> tasks;
+
+  const SnapshotDetail({
+    required this.snapshotId,
+    required this.savedAt,
+    required this.remark,
+    required this.tasks,
+  });
+
+  factory SnapshotDetail.fromJson(Map<String, dynamic> json) => SnapshotDetail(
+        snapshotId: (json['snapshot_id'] as num).toInt(),
+        savedAt: json['saved_at'] as String? ?? '',
+        remark: json['remark'] as String? ?? '',
+        tasks: (json['tasks'] as List? ?? const [])
+            .map((value) => Task.fromJson(Map<String, dynamic>.from(value as Map)))
+            .toList(),
+      );
+}
+
 class FilterReq {
   final String? meetingNo;
   final int? taskNo;

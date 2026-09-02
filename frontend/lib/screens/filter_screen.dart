@@ -79,23 +79,23 @@ class _FilterScreenState extends State<FilterScreen> {
                 spacing: 12,
                 runSpacing: 8,
                 children: [
-                  _textField(_meeting, '会议纪要号', width: 180),
-                  _textField(_taskNo, '任务序号', width: 100, isNum: true),
+                  _textField(_meeting, '会议纪要号', width: 200),
+                  _textField(_taskNo, '任务序号', width: 130, isNum: true),
                   _textField(
                     _dept,
-                    '责任部门(逗号分隔)',
-                    width: 220,
+                    '责任部门',
+                    width: 170,
                     normalizeCommas: true,
                   ),
                   _textField(
                     _owner,
-                    '责任人(逗号分隔)',
-                    width: 180,
+                    '责任人',
+                    width: 150,
                     normalizeCommas: true,
                   ),
-                  _textField(_delayIndex, '延期次数>=', width: 100, isNum: true),
+                  _textField(_delayIndex, '延期次数≥', width: 150, isNum: true),
                   SizedBox(
-                    width: 150,
+                    width: 170,
                     child: DropdownButtonFormField<int>(
                       initialValue: _attachmentMode,
                       decoration: const InputDecoration(
@@ -226,7 +226,15 @@ class _FilterScreenState extends State<FilterScreen> {
         inputFormatters: normalizeCommas
             ? const [EnglishCommaTextInputFormatter()]
             : null,
-        decoration: InputDecoration(labelText: label, isDense: true),
+        decoration: InputDecoration(
+          label: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(label),
+          ),
+          isDense: true,
+          floatingLabelBehavior: FloatingLabelBehavior.always,
+        ),
       ),
     );
   }

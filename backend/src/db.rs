@@ -2,7 +2,7 @@ use anyhow::Result;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
 };
-use sqlx::{Pool, Sqlite};
+use sqlx::{Pool, Row, Sqlite};
 use std::str::FromStr;
 use std::time::Duration;
 include!(concat!(env!("OUT_DIR"), "/migrations.rs"));
@@ -30,6 +30,7 @@ pub async fn init(db_path: &str) -> Result<Db> {
     for sql in MIGRATIONS.iter() {
         sqlx::query(sql).execute(&pool).await?;
     }
+    ensure_snapshot_remark_column(&pool).await?;
     // 旧版本允许未完成任务的实际完成时间为空；统一迁移为明确的进行中状态。
     sqlx::query("UPDATE tasks SET actual_date = '进行中' WHERE trim(actual_date) = ''")
         .execute(&pool)
@@ -37,6 +38,23 @@ pub async fn init(db_path: &str) -> Result<Db> {
     // 让 SQLite 根据当前数据分布更新查询规划统计信息。
     sqlx::query("PRAGMA optimize").execute(&pool).await?;
     Ok(pool)
+}
+
+
+async fn ensure_snapshot_remark_column(pool: &Db) -> Result<()> {
+    let columns = sqlx::query("PRAGMA table_info(snapshots)")
+        .fetch_all(pool)
+        .await?;
+    let exists = columns.iter().any(|row| {
+        row.try_get::<String, _>("name")
+            .is_ok_and(|name| name == "remark")
+    });
+    if !exists {
+        sqlx::query("ALTER TABLE snapshots ADD COLUMN remark TEXT NOT NULL DEFAULT ''")
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
 }
 
 pub fn default_db_path() -> String {

@@ -143,14 +143,32 @@ class Api {
     return Map<String, dynamic>.from(reply.result as Map);
   }
 
-  static Future<int> createSnapshot() async {
-    final reply = await _call('snapshot.create');
-    return ((reply.result as Map)['snapshot_id'] as num).toInt();
+  static Future<SnapshotCreateResult> createSnapshot(String? remark) async {
+    final reply = await _call(
+      'snapshot.create',
+      params: {
+        if (remark != null && remark.trim().isNotEmpty) 'remark': remark.trim(),
+      },
+    );
+    return SnapshotCreateResult.fromJson(
+      Map<String, dynamic>.from(reply.result as Map),
+    );
   }
 
-  static Future<List<Map<String, dynamic>>> listSnapshots() async {
+  static Future<List<SnapshotInfo>> listSnapshots() async {
     final reply = await _call('snapshot.list');
-    return (reply.result as List).map((value) => Map<String, dynamic>.from(value as Map)).toList();
+    return (reply.result as List)
+        .map((value) => SnapshotInfo.fromJson(
+              Map<String, dynamic>.from(value as Map),
+            ))
+        .toList();
+  }
+
+  static Future<SnapshotDetail> getSnapshot(int snapshotId) async {
+    final reply = await _call('snapshot.get', params: {'id': snapshotId});
+    return SnapshotDetail.fromJson(
+      Map<String, dynamic>.from(reply.result as Map),
+    );
   }
 
   static Future<String> exportDbFile() async {
