@@ -520,7 +520,9 @@ fn build_notification(
     sequence_no: i64,
     today: NaiveDate,
 ) -> Option<(String, i64, String)> {
-    if !task.actual_date.trim().is_empty() && task.actual_date.trim() != "进行中" {
+    // 只有实际完成时间是可解析的确切日期时，才认定任务已完成。
+    // 空值、“进行中”或其他非日期文本均视为未完成，需要继续提醒。
+    if parse_task_date(&task.actual_date).is_some() {
         return None;
     }
     let expected_date = task
@@ -559,6 +561,13 @@ fn build_notification(
         remaining_days,
         with_sequence_prefix(sequence_no, &body),
     ))
+}
+
+fn parse_task_date(value: &str) -> Option<NaiveDate> {
+    let value = value.trim();
+    NaiveDate::parse_from_str(value, "%Y/%m/%d")
+        .or_else(|_| NaiveDate::parse_from_str(value, "%Y-%m-%d"))
+        .ok()
 }
 
 fn notification_db_path() -> String {
@@ -690,6 +699,14 @@ mod tests {
         );
         assert!(build_notification(&task("进行中", "2026/09/09", ""), 1, today).is_none());
     }
+    #[test]
+    fn only_a_precise_actual_date_marks_task_completed() {
+        let today = NaiveDate::from_ymd_opt(2026, 9, 2).unwrap();
+        assert!(build_notification(&task("2026/09/01", "2026/09/01", ""), 1, today).is_none());
+        assert!(build_notification(&task("进行中", "2026/09/03", ""), 1, today).is_some());
+        assert!(build_notification(&task("完成待确认", "2026/09/03", ""), 1, today).is_some());
+    }
+
     #[tokio::test]
     async fn read_state_changes_only_on_item_click_and_import_resets_to_unread() {
         let unique = uuid::Uuid::new_v4();

@@ -96,4 +96,28 @@ void main() {
       expect(resizedWindow[i], greaterThanOrEqualTo(taskAllMinColumnWidths[i]));
     }
   });
+  test('auto fit uses content widths and keeps the remark column as the remainder', () {
+    const width = 1600.0;
+    final fitted = autoFitTaskColumnWidths(width, [
+      [
+        '1',
+        '纪要〔2026〕1号',
+        '1',
+        '这是一条很长的任务内容，用于自动调整列宽',
+        '工程部',
+        '张三',
+        '2026/09/10',
+        '进行中',
+        '',
+        '',
+        '',
+        '备注',
+      ],
+    ]);
+
+    expect(fitted[3], greaterThan(taskPreferredColumnWidths[3]));
+    expect(fitted.last, greaterThanOrEqualTo(taskRemarkMinWidth));
+    expectFillsWidth(fitted, width);
+  });
+
 }

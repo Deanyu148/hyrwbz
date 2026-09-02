@@ -140,11 +140,15 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
                   child: Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          _columnLabels[index],
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            _columnLabels[index],
+                            maxLines: 1,
+                            softWrap: false,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
                         ),
                       ),
                       _sortIcon(index),
@@ -171,7 +175,7 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
       task.actualDate,
       lastDelay?.delayDate ?? '',
       lastDelay?.delayReason ?? '',
-      task.hasAttachment ? '有' : '无',
+      '',
       task.remark,
     ];
     final scheme = Theme.of(context).colorScheme;
@@ -201,11 +205,18 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
               ),
               child: Tooltip(
                 message: values[column],
-                child: Text(
-                  values[column],
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: column == 10
+                    ? task.hasAttachment
+                        ? const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Icon(Icons.attach_file_rounded, size: 19),
+                          )
+                        : const SizedBox.shrink()
+                    : Text(
+                        values[column],
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
               ),
             ),
         ],
@@ -295,6 +306,8 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
                                     _header(widths),
                                     Expanded(
                                       child: Scrollbar(
+                                        thumbVisibility: false,
+                                        interactive: true,
                                         child: ListView.builder(
                                           itemCount: tasks.length,
                                           itemBuilder: (context, index) =>

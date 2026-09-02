@@ -152,3 +152,74 @@ List<double> resizeTaskColumnWidths(
   resized[remarkIndex] = remarkWidth - applied;
   return _finishTotal(resized, _usableTaskWidth(availableWidth));
 }
+
+const List<String> taskColumnHeaderLabels = [
+  '序号',
+  '会议纪要号',
+  '任务序号',
+  '任务内容',
+  '责任部门',
+  '责任人',
+  '计划完成时间',
+  '实际完成时间',
+  '最后延期',
+  '延期理由',
+  '附件',
+  '备注',
+];
+
+double _estimateTaskCellWidth(String value) {
+  var width = 16.0;
+  for (final rune in value.runes) {
+    width += rune <= 0x7f ? 8.0 : 14.0;
+  }
+  return width;
+}
+
+/// 根据表头和当前数据内容自动计算列宽。
+/// 备注列仍然吸收剩余宽度，保证表格总宽度与窗口一致。
+List<double> autoFitTaskColumnWidths(
+  double availableWidth,
+  List<List<String>> rows,
+) {
+  final usable = _usableTaskWidth(availableWidth);
+  final minimums = _minimumsForUsableWidth(usable);
+  final desired = List<double>.generate(taskColumnCount - 1, (index) {
+    var width = _estimateTaskCellWidth(taskColumnHeaderLabels[index]);
+    for (final row in rows) {
+      if (index < row.length) {
+        width = width > _estimateTaskCellWidth(row[index])
+            ? width
+            : _estimateTaskCellWidth(row[index]);
+      }
+    }
+    return width.clamp(minimums[index], 320.0).toDouble();
+  });
+  final minimumNonRemark = minimums
+      .take(taskColumnCount - 1)
+      .fold<double>(0, (sum, width) => sum + width);
+  final minimumTotal = minimums.fold<double>(0, (sum, width) => sum + width);
+  final desiredNonRemark = desired.fold<double>(0, (sum, width) => sum + width);
+  if (usable <= minimumTotal) {
+    return _finishTotal(minimums, usable);
+  }
+  final targetNonRemark = usable - minimums.last;
+  if (desiredNonRemark <= targetNonRemark) {
+    return _finishTotal(
+      [...desired, usable - desiredNonRemark],
+      usable,
+    );
+  }
+
+  final extraAvailable = targetNonRemark - minimumNonRemark;
+  final desiredExtra = desiredNonRemark - minimumNonRemark;
+  if (desiredExtra <= 0.001) {
+    return _finishTotal([...minimums.take(taskColumnCount - 1), minimums.last], usable);
+  }
+  final fitted = List<double>.generate(
+    taskColumnCount - 1,
+    (index) => minimums[index] +
+        extraAvailable * (desired[index] - minimums[index]) / desiredExtra,
+  );
+  return _finishTotal([...fitted, taskRemarkMinWidth], usable);
+}

@@ -43,6 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _filterSummary = '';
   bool _backendOk = true;
   final Set<int> _selectedIds = <int>{};
+  final ScrollController _tableScrollController = ScrollController();
 
   List<Task> get _selectedTasks => _allTasks
       .where((task) => task.id != null && _selectedIds.contains(task.id))
@@ -65,6 +66,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _persistColumnWidths();
     _searchDebounce?.cancel();
     _searchController.dispose();
+    _tableScrollController.dispose();
     super.dispose();
   }
 
@@ -652,6 +654,40 @@ class _HomeScreenState extends State<HomeScreen> {
     if (widths != null) TaskColumnWidthStore.saveSync(widths);
   }
 
+  List<String> _cellTextsForTask(int index, Task task) {
+    final lastDelay = task.delays.isNotEmpty ? task.delays.last : null;
+    return [
+      '${index + 1}',
+      task.meetingNo,
+      task.taskNo.toString(),
+      task.taskDesc,
+      task.dept,
+      task.owner,
+      task.requiredDate,
+      task.actualDate,
+      lastDelay?.delayDate ?? '',
+      lastDelay?.delayReason ?? '',
+      '',
+      task.remark,
+    ];
+  }
+
+  void _autoAdjustColumnWidths() {
+    final availableWidth = _tableAvailableWidth;
+    if (availableWidth == null) return;
+    setState(() {
+      _columnWidths = autoFitTaskColumnWidths(
+        availableWidth,
+        _tasks
+            .asMap()
+            .entries
+            .map((entry) => _cellTextsForTask(entry.key, entry.value))
+            .toList(),
+      );
+    });
+    _persistColumnWidths();
+  }
+
   void _sortByTableIndex(int index) {
     final column = taskSortColumnForIndex(index);
     if (column == null) return;
@@ -738,11 +774,15 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
                   _sortIcon(index),
@@ -774,13 +814,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDataRow(int index, Task t, List<double> widths) {
-    final lastDelay = t.delays.isNotEmpty ? t.delays.last : null;
     final isSelected = t.id != null && _selectedIds.contains(t.id);
-    final cellTexts = [
-      '${index + 1}', t.meetingNo, t.taskNo.toString(), t.taskDesc, t.dept,
-      t.owner, t.requiredDate, t.actualDate, lastDelay?.delayDate ?? '',
-      lastDelay?.delayReason ?? '', t.hasAttachment ? '有' : '无', t.remark,
-    ];
+    final cellTexts = _cellTextsForTask(index, t);
     final scheme = Theme.of(context).colorScheme;
     final rowColor = isSelected
         ? scheme.primary.withValues(alpha: 0.10)
@@ -828,7 +863,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   waitDuration: const Duration(milliseconds: 500),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    child: Text(cellTexts[i], maxLines: 1, overflow: TextOverflow.ellipsis),
+                    child: i == 10
+                        ? t.hasAttachment
+                            ? const Align(
+                                alignment: Alignment.centerLeft,
+                                child: Icon(Icons.attach_file_rounded, size: 19),
+                              )
+                            : const SizedBox.shrink()
+                        : Text(
+                            cellTexts[i],
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                   ),
                 ),
               ),
@@ -880,6 +926,8 @@ class _HomeScreenState extends State<HomeScreen> {
             action(Icons.more_time_rounded, '添加延期', _addDelay),
             const SizedBox(width: 8),
             action(Icons.history_toggle_off_rounded, '查看/删除延期', _delDelay),
+            const SizedBox(width: 8),
+            action(Icons.auto_fix_high_rounded, '自动调整列宽', _autoAdjustColumnWidths),
             const SizedBox(width: 14),
             if (_filterSummary.isNotEmpty)
               Flexible(
@@ -1017,7 +1065,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                 _buildHeaderRow(widths),
                                 Expanded(
                                   child: Scrollbar(
+                                    controller: _tableScrollController,
+                                    thumbVisibility: false,
+                                    interactive: true,
                                     child: ListView.builder(
+                                      controller: _tableScrollController,
                                       itemCount: _tasks.length,
                                       itemBuilder: (context, index) =>
                                           _buildDataRow(
