@@ -10,6 +10,7 @@ on:
       - 'README.md'
       - 'readme.md'
       - '.gitignore'
+      - 'scripts/**'
   workflow_dispatch:
     inputs:
       is_pre_release:
