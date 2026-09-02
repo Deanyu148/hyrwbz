@@ -42,3 +42,9 @@ branch:
         event: web_trigger_sync_releases
         permissions:
           users: [1freedom]
+      - name: 删除多余的 CNB Releases
+        description: 删除多余的 CNB Releases
+        event: web_trigger_del_releases
+        permissions:
+          users: [1freedom]
+      
