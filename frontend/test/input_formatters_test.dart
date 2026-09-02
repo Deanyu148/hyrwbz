@@ -15,9 +15,9 @@ void main() {
     const text = '张三，李四、王五';
     final result = formatter.formatEditUpdate(
       TextEditingValue.empty,
-      TextEditingValue(
+      const TextEditingValue(
         text: text,
-        selection: TextSelection.collapsed(offset: text.length),
+        selection: TextSelection.collapsed(offset: 8),
       ),
     );
 

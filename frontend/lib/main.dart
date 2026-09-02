@@ -14,7 +14,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     await windowManager.ensureInitialized();
-    final windowOptions = WindowOptions(
+    const windowOptions = WindowOptions(
       size: WindowStateStore.minimumSize,
       minimumSize: WindowStateStore.minimumSize,
       center: true,

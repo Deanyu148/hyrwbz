@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'notification_model.dart';
 
+const _notificationRefreshInterval = Duration(seconds: 30);
+
 class NotificationListView extends StatelessWidget {
   final List<NotificationItem> notifications;
   final bool compact;
@@ -21,6 +23,10 @@ class NotificationListView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final visibleNotifications = compact && notifications.length > 4
+        ? notifications.take(4).toList()
+        : notifications;
+    final hiddenCount = notifications.length - visibleNotifications.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -49,17 +55,20 @@ class NotificationListView extends StatelessWidget {
               ? const Center(child: Text('暂无需要提醒的任务'))
               : ListView.builder(
                   padding: EdgeInsets.zero,
-                  itemCount: notifications.length,
+                  physics: compact
+                      ? const NeverScrollableScrollPhysics()
+                      : null,
+                  itemCount: visibleNotifications.length,
                   itemBuilder: (context, index) {
-                    final item = notifications[index];
+                    final item = visibleNotifications[index];
                     return Tooltip(
                       message: '点击查看详情',
                       child: InkWell(
                         onTap: () => onTap(item),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(
+                          padding: EdgeInsets.symmetric(
                             horizontal: 12,
-                            vertical: 10,
+                            vertical: compact ? 7 : 10,
                           ),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -97,6 +106,18 @@ class NotificationListView extends StatelessWidget {
                   },
                 ),
         ),
+        if (compact && hiddenCount > 0) ...[
+          const Divider(height: 1),
+          SizedBox(
+            height: 30,
+            child: Center(
+              child: Text(
+                '还有 $hiddenCount 条，点击通知按钮查看全部',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -116,12 +137,23 @@ class NotificationScreen extends StatefulWidget {
 
 class _NotificationScreenState extends State<NotificationScreen> {
   List<NotificationItem> _notifications = const [];
+  Timer? _refreshTimer;
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _refreshTimer = Timer.periodic(
+      _notificationRefreshInterval,
+      (_) => _load(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -198,7 +230,10 @@ class _NotificationButtonState extends State<NotificationButton> {
   void initState() {
     super.initState();
     _load();
-    _refreshTimer = Timer.periodic(const Duration(minutes: 1), (_) => _load());
+    _refreshTimer = Timer.periodic(
+      _notificationRefreshInterval,
+      (_) => _load(),
+    );
   }
 
   @override
@@ -216,6 +251,12 @@ class _NotificationButtonState extends State<NotificationButton> {
       setState(() => _notifications = items);
       _entry?.markNeedsBuild();
     } catch (_) {}
+  }
+
+  double get _compactPanelHeight {
+    if (_notifications.isEmpty) return 118;
+    final visibleCount = _notifications.length > 4 ? 4 : _notifications.length;
+    return 51 + visibleCount * 54 + (_notifications.length > 4 ? 30 : 0);
   }
 
   void _showPanel() {
@@ -236,8 +277,8 @@ class _NotificationButtonState extends State<NotificationButton> {
             borderRadius: BorderRadius.circular(8),
             clipBehavior: Clip.antiAlias,
             child: SizedBox(
-              width: 380,
-              height: 420,
+              width: 320,
+              height: _compactPanelHeight,
               child: NotificationListView(
                 notifications: _notifications,
                 compact: true,

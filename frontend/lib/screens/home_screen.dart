@@ -220,7 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
     }
-    if (task != null && mounted) await _viewTask(task!);
+    if (task != null && mounted) await _viewTask(task);
   }
 
   Future<void> _openNotificationScreen() async {
@@ -392,6 +392,7 @@ class _HomeScreenState extends State<HomeScreen> {
       allowedExtensions: ['zip'],
     );
     if (res == null || res.files.single.path == null) return;
+    if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(

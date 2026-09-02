@@ -10,6 +10,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+pub const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Notification {
     pub id: i64,
@@ -82,6 +84,7 @@ impl NotificationStore {
     pub async fn refresh(&self, core_db: &Db) -> Result<()> {
         let _guard = self.refresh_lock.lock().await;
         let today = Local::now().date_naive();
+        // 始终扫描核心数据库中的全部任务，不受主界面当前筛选条件影响。
         let tasks = service::list_tasks(core_db, &FilterReq::default())
             .await
             .map_err(|error| anyhow::anyhow!(error.message))?;

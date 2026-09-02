@@ -80,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
                 #[cfg(debug_assertions)]
                 tracing::warn!("notification refresh failed: {}", error);
             }
-            tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
+            tokio::time::sleep(notifications::REFRESH_INTERVAL).await;
         }
     });
     #[cfg(debug_assertions)]
