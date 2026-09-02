@@ -461,17 +461,26 @@ fn meeting_no_key(value: &str) -> Option<(&str, i64, i64)> {
 
 fn with_sequence_prefix(sequence_no: i64, message: &str) -> String {
     let body = strip_sequence_prefix(message);
-    format!("序号“{}”，{}", sequence_no, body)
+    format!("序号{}，{}", sequence_no, body)
 }
 
 fn strip_sequence_prefix(message: &str) -> &str {
-    let Some(rest) = message.strip_prefix("序号“") else {
-        return message;
-    };
-    let Some(end) = rest.find("”，") else {
-        return message;
-    };
-    &rest[end + "”，".len()..]
+    if let Some(rest) = message.strip_prefix("序号“") {
+        if let Some(end) = rest.find("”，") {
+            return &rest[end + "”，".len()..];
+        }
+    }
+    if let Some(rest) = message.strip_prefix("序号") {
+        if let Some(end) = rest.find('，') {
+            let sequence = &rest[..end];
+            if !sequence.is_empty()
+                && sequence.chars().all(|value| value.is_ascii_digit())
+            {
+                return &rest[end + '，'.len_utf8()..];
+            }
+        }
+    }
+    message
 }
 
 fn build_notification(
@@ -577,7 +586,7 @@ mod tests {
         assert_eq!(notification.1, 0);
         assert_eq!(
             notification.2,
-            "序号“7”，第纪要〔2026〕1号中，第2号任务，已经到达期望完成日期，请检查相关事宜。"
+            "序号7，第纪要〔2026〕1号中，第2号任务，已经到达期望完成日期，请检查相关事宜。"
         );
 
         let overdue =
@@ -585,7 +594,7 @@ mod tests {
         assert_eq!(overdue.1, -1);
         assert_eq!(
             overdue.2,
-            "序号“7”，第纪要〔2026〕1号中，第2号任务，已经超过期望完成日期1天。"
+            "序号7，第纪要〔2026〕1号中，第2号任务，已经超过期望完成日期1天。"
         );
 
         let upcoming =
@@ -593,7 +602,7 @@ mod tests {
         assert_eq!(upcoming.1, 5);
         assert_eq!(
             upcoming.2,
-            "序号“7”，第纪要〔2026〕1号中，第2号任务，距期望完成时间5天。"
+            "序号7，第纪要〔2026〕1号中，第2号任务，距期望完成时间5天。"
         );
     }
 
@@ -601,11 +610,15 @@ mod tests {
     fn sequence_prefix_replaces_old_task_number_prefix() {
         assert_eq!(
             with_sequence_prefix(7, "序号“2”，原通知正文"),
-            "序号“7”，原通知正文"
+            "序号7，原通知正文"
         );
         assert_eq!(
             with_sequence_prefix(7, "原通知正文"),
-            "序号“7”，原通知正文"
+            "序号7，原通知正文"
+        );
+        assert_eq!(
+            with_sequence_prefix(7, "序号2，原通知正文"),
+            "序号7，原通知正文"
         );
     }
 
