@@ -24,7 +24,7 @@ void main() {
           body: Center(
             child: SizedBox(
               width: CompactNotificationPanel.panelWidth,
-              height: 166,
+              height: CompactNotificationPanel.heightForItemCount(6),
               child: CompactNotificationPanel(
                 notifications: notifications,
                 onMarkAllRead: () async {},
@@ -36,15 +36,15 @@ void main() {
       ),
     );
 
-    expect(CompactNotificationPanel.panelWidth, 130);
+    expect(CompactNotificationPanel.panelWidth, 390);
     expect(
       tester.getSize(find.byType(CompactNotificationPanel)),
-      const Size(130, 166),
+      const Size(390, 498),
     );
-    expect(CompactNotificationPanel.heightForItemCount(0), 82);
-    expect(CompactNotificationPanel.heightForItemCount(1), 89);
-    expect(CompactNotificationPanel.heightForItemCount(2), 141);
-    expect(CompactNotificationPanel.heightForItemCount(6), 166);
+    expect(CompactNotificationPanel.heightForItemCount(0), 246);
+    expect(CompactNotificationPanel.heightForItemCount(1), 267);
+    expect(CompactNotificationPanel.heightForItemCount(2), 423);
+    expect(CompactNotificationPanel.heightForItemCount(6), 498);
     expect(find.text('通知1'), findsOneWidget);
     expect(find.text('通知2'), findsOneWidget);
     expect(find.text('通知3'), findsNothing);

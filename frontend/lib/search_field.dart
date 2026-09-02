@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 class AppBarSearchTitle extends StatelessWidget {
+  static const double searchVerticalOffset = 2;
+
   final String title;
   final TextEditingController controller;
   final String hintText;
@@ -24,10 +26,13 @@ class AppBarSearchTitle extends StatelessWidget {
           Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
           const SizedBox(width: 18),
           Expanded(
-            child: AppSearchField(
-              controller: controller,
-              hintText: hintText,
-              onChanged: onChanged,
+            child: Transform.translate(
+              offset: const Offset(0, searchVerticalOffset),
+              child: AppSearchField(
+                controller: controller,
+                hintText: hintText,
+                onChanged: onChanged,
+              ),
             ),
           ),
         ],

@@ -68,15 +68,21 @@ class NotificationListView extends StatelessWidget {
 
 /// 仅供鼠标悬停预览使用的紧凑面板，与完整通知界面完全独立。
 class CompactNotificationPanel extends StatelessWidget {
-  static const double panelWidth = 130;
+  static const double panelScale = 3;
+  static const double panelWidth = 130 * panelScale;
+  static const double _headerHeight = 36 * panelScale;
+  static const double _previewItemHeight = 52 * panelScale;
+  static const double _footerHeight = 24 * panelScale;
+  static const double _dividerHeight = panelScale;
   static const int maxPreviewItems = 2;
 
   static double heightForItemCount(int itemCount) {
-    if (itemCount <= 0) return 82;
+    if (itemCount <= 0) return 82 * panelScale;
     final visibleCount = itemCount > maxPreviewItems
         ? maxPreviewItems
         : itemCount;
-    return 37 + visibleCount * 52 + (itemCount > visibleCount ? 25 : 0);
+    return (37 + visibleCount * 52 + (itemCount > visibleCount ? 25 : 0)) *
+        panelScale;
   }
 
   final List<NotificationItem> notifications;
@@ -98,7 +104,7 @@ class CompactNotificationPanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
-          height: 36,
+          height: _headerHeight,
           child: Padding(
             padding: const EdgeInsets.only(left: 8, right: 2),
             child: Row(
@@ -108,7 +114,10 @@ class CompactNotificationPanel extends StatelessWidget {
                     '通知',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 IconButton(
@@ -128,20 +137,20 @@ class CompactNotificationPanel extends StatelessWidget {
             ),
           ),
         ),
-        const Divider(height: 1),
+        const Divider(height: _dividerHeight),
         if (notifications.isEmpty)
           const Expanded(
             child: Center(
               child: Text(
                 '暂无通知',
-                style: TextStyle(fontSize: 12),
+                style: TextStyle(fontSize: 13),
               ),
             ),
           )
         else
           for (final item in visible)
             SizedBox(
-              height: 52,
+              height: _previewItemHeight,
               child: Tooltip(
                 message: '点击查看详情',
                 child: InkWell(
@@ -175,7 +184,7 @@ class CompactNotificationPanel extends StatelessWidget {
                             item.message,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 11),
+                            style: const TextStyle(fontSize: 12),
                           ),
                         ),
                       ],
@@ -185,15 +194,17 @@ class CompactNotificationPanel extends StatelessWidget {
               ),
             ),
         if (hiddenCount > 0) ...[
-          const Divider(height: 1),
+          const Divider(height: _dividerHeight),
           SizedBox(
-            height: 24,
+            height: _footerHeight,
             child: Center(
               child: Text(
                 '还有 $hiddenCount 条',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontSize: 13,
+                ),
               ),
             ),
           ),
@@ -300,15 +311,15 @@ class _NotificationScreenState extends State<NotificationScreen> {
           onChanged: _searchNotifications,
         ),
         actions: [
-          TextButton.icon(
-            onPressed: _openHistory,
-            icon: const Icon(Icons.history),
-            label: const Text('历史通知'),
-          ),
           IconButton(
             tooltip: '刷新通知',
             icon: const Icon(Icons.refresh),
             onPressed: _load,
+          ),
+          TextButton.icon(
+            onPressed: _openHistory,
+            icon: const Icon(Icons.history),
+            label: const Text('历史通知'),
           ),
           TextButton(
             onPressed: hasUnread ? _markAllRead : null,
