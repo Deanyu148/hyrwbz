@@ -4,7 +4,7 @@ use crate::db::Db;
 use crate::models::*;
 use chrono::{Local, NaiveDate};
 use serde_json::{json, Value};
-use sqlx::Row;
+use sqlx::{QueryBuilder, Row, Sqlite};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -129,6 +129,43 @@ pub async fn list_tasks(db: &Db, f: &FilterReq) -> ServiceResult<Vec<Task>> {
         });
     }
 
+    match (f.delay_date_from.as_ref(), f.delay_date_to.as_ref()) {
+        (Some(from), Some(to)) => {
+            where_parts.push(format!(
+                "EXISTS (SELECT 1 FROM delays d WHERE d.task_id = t.id                  AND d.delay_date >= ?{} AND d.delay_date <= ?{})",
+                idx,
+                idx + 1
+            ));
+            params.push(from.clone());
+            params.push(to.clone());
+            idx += 2;
+        }
+        (Some(from), None) => {
+            where_parts.push(format!(
+                "EXISTS (SELECT 1 FROM delays d WHERE d.task_id = t.id AND d.delay_date >= ?{})",
+                idx
+            ));
+            params.push(from.clone());
+            idx += 1;
+        }
+        (None, Some(to)) => {
+            where_parts.push(format!(
+                "EXISTS (SELECT 1 FROM delays d WHERE d.task_id = t.id AND d.delay_date <= ?{})",
+                idx
+            ));
+            params.push(to.clone());
+            idx += 1;
+        }
+        (None, None) => {}
+    }
+    if let Some(minimum) = f.delay_index {
+        where_parts.push(format!(
+            "(SELECT COUNT(*) FROM delays d WHERE d.task_id = t.id) >= CAST(?{} AS INTEGER)",
+            idx
+        ));
+        params.push(minimum.to_string());
+    }
+
     let mut sql = String::from(
         "SELECT t.*, EXISTS (SELECT 1 FROM attachments a WHERE a.task_id = t.id) AS has_attachment FROM tasks t",
     );
@@ -144,19 +181,6 @@ pub async fn list_tasks(db: &Db, f: &FilterReq) -> ServiceResult<Vec<Task>> {
     let rows = query.fetch_all(db).await.map_err(internal)?;
     let mut tasks = build_tasks(rows, db).await?;
 
-    let from = f.delay_date_from.as_ref();
-    let to = f.delay_date_to.as_ref();
-    if from.is_some() || to.is_some() {
-        tasks.retain(|task| {
-            task.delays.iter().any(|delay| {
-                from.map_or(true, |value| delay.delay_date >= *value)
-                    && to.map_or(true, |value| delay.delay_date <= *value)
-            })
-        });
-    }
-    if let Some(minimum) = f.delay_index {
-        tasks.retain(|task| task.delays.len() as i64 >= minimum);
-    }
     if let Some(maximum_days) = f.expected_remaining_days {
         let today = Local::now().date_naive();
         tasks.retain(|task| {
@@ -203,12 +227,17 @@ async fn build_tasks(rows: Vec<sqlx::sqlite::SqliteRow>, db: &Db) -> ServiceResu
         });
     }
     if !tasks.is_empty() {
-        let ids: Vec<String> = tasks.iter().map(|task| task.id.to_string()).collect();
-        let sql = format!(
-            "SELECT * FROM delays WHERE task_id IN ({}) ORDER BY id",
-            ids.join(",")
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            "SELECT id, task_id, meeting_no, task_no, delay_date, delay_reason, created_at              FROM delays WHERE task_id IN (",
         );
-        for row in sqlx::query(&sql).fetch_all(db).await.map_err(internal)? {
+        {
+            let mut separated = builder.separated(", ");
+            for task in &tasks {
+                separated.push_bind(task.id);
+            }
+        }
+        builder.push(") ORDER BY task_id, id");
+        for row in builder.build().fetch_all(db).await.map_err(internal)? {
             let task_id = row.try_get("task_id").unwrap_or_default();
             if let Some(&index) = by_id.get(&task_id) {
                 tasks[index].delays.push(Delay {
@@ -281,17 +310,24 @@ pub async fn update_task(db: &Db, id: i64, req: UpdateTaskReq) -> ServiceResult<
 }
 
 pub async fn delete_task(db: &Db, id: i64) -> ServiceResult<Value> {
-    sqlx::query("DELETE FROM delays WHERE task_id = ?1")
+    let stored_names: Vec<String> =
+        sqlx::query_scalar("SELECT stored_name FROM attachments WHERE task_id = ?1")
+            .bind(id)
+            .fetch_all(db)
+            .await
+            .map_err(internal)?;
+    let mut tx = db.begin().await.map_err(internal)?;
+    // delays 和 attachments 由外键级联删除，避免多次往返和半删除状态。
+    let result = sqlx::query("DELETE FROM tasks WHERE id = ?1")
         .bind(id)
-        .execute(db)
+        .execute(&mut *tx)
         .await
         .map_err(internal)?;
-    sqlx::query("DELETE FROM tasks WHERE id = ?1")
-        .bind(id)
-        .execute(db)
-        .await
-        .map_err(internal)?;
-    Ok(json!({"ok": true}))
+    tx.commit().await.map_err(internal)?;
+    for stored_name in stored_names {
+        remove_attachment_file(&attachment_path(&stored_name)).ok();
+    }
+    Ok(json!({"ok": true, "deleted": result.rows_affected()}))
 }
 
 pub async fn list_delays(db: &Db, task_id: i64) -> ServiceResult<Vec<Delay>> {
@@ -609,6 +645,77 @@ mod tests {
         .unwrap();
         let task_numbers: Vec<i64> = tasks.into_iter().map(|task| task.task_no).collect();
         assert_eq!(task_numbers, vec![1, 2, 3]);
+
+        db.close().await;
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn delay_range_filter_requires_one_matching_delay() {
+        let unique = uuid::Uuid::new_v4();
+        let path = std::env::temp_dir().join(format!("hyrwbz_delay_filter_{unique}.db"));
+        let db = crate::db::init(path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+        for task_no in [1i64, 2] {
+            sqlx::query(
+                "INSERT INTO tasks
+                 (meeting_no, task_no, task_desc, dept, owner, required_date, actual_date, remark)
+                 VALUES ('RANGE', ?1, '', '', '', '', '进行中', '')",
+            )
+            .bind(task_no)
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+        let first: i64 = sqlx::query_scalar(
+            "SELECT id FROM tasks WHERE meeting_no = 'RANGE' AND task_no = 1",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let second: i64 = sqlx::query_scalar(
+            "SELECT id FROM tasks WHERE meeting_no = 'RANGE' AND task_no = 2",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        for date in ["2026/09/01", "2026/09/20"] {
+            sqlx::query(
+                "INSERT INTO delays
+                 (task_id, meeting_no, task_no, delay_date, delay_reason)
+                 VALUES (?1, 'RANGE', 1, ?2, '')",
+            )
+            .bind(first)
+            .bind(date)
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO delays
+             (task_id, meeting_no, task_no, delay_date, delay_reason)
+             VALUES (?1, 'RANGE', 2, '2026/09/07', '')",
+        )
+        .bind(second)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let tasks = list_tasks(
+            &db,
+            &FilterReq {
+                delay_date_from: Some("2026/09/05".to_string()),
+                delay_date_to: Some("2026/09/10".to_string()),
+                ..FilterReq::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tasks.into_iter().map(|task| task.task_no).collect::<Vec<_>>(),
+            vec![2]
+        );
 
         db.close().await;
         std::fs::remove_file(path).ok();

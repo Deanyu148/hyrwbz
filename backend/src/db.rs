@@ -1,7 +1,10 @@
 use anyhow::Result;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+};
 use sqlx::{Pool, Sqlite};
 use std::str::FromStr;
+use std::time::Duration;
 include!(concat!(env!("OUT_DIR"), "/migrations.rs"));
 
 pub type Db = Pool<Sqlite>;
@@ -12,9 +15,16 @@ pub async fn init(db_path: &str) -> Result<Db> {
     }
     let options = SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path))?
         .create_if_missing(true)
-        .foreign_keys(true);
+        .foreign_keys(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .busy_timeout(Duration::from_secs(10))
+        .pragma("temp_store", "MEMORY")
+        .pragma("cache_size", "-20000");
     let pool = SqlitePoolOptions::new()
-        .max_connections(5)
+        .min_connections(1)
+        .max_connections(6)
+        .idle_timeout(Some(Duration::from_secs(300)))
         .connect_with(options)
         .await?;
     for sql in MIGRATIONS.iter() {
@@ -24,6 +34,8 @@ pub async fn init(db_path: &str) -> Result<Db> {
     sqlx::query("UPDATE tasks SET actual_date = '进行中' WHERE trim(actual_date) = ''")
         .execute(&pool)
         .await?;
+    // 让 SQLite 根据当前数据分布更新查询规划统计信息。
+    sqlx::query("PRAGMA optimize").execute(&pool).await?;
     Ok(pool)
 }
 

@@ -7,6 +7,7 @@ class AppBarSearchTitle extends StatelessWidget {
   final TextEditingController controller;
   final String hintText;
   final ValueChanged<String> onChanged;
+  final bool loading;
 
   const AppBarSearchTitle({
     super.key,
@@ -14,6 +15,7 @@ class AppBarSearchTitle extends StatelessWidget {
     required this.controller,
     required this.hintText,
     required this.onChanged,
+    this.loading = false,
   });
 
   @override
@@ -32,6 +34,7 @@ class AppBarSearchTitle extends StatelessWidget {
                 controller: controller,
                 hintText: hintText,
                 onChanged: onChanged,
+                loading: loading,
               ),
             ),
           ),
@@ -43,19 +46,27 @@ class AppBarSearchTitle extends StatelessWidget {
 
 class AppSearchField extends StatelessWidget {
   static const double fieldHeight = 38;
+
   final TextEditingController controller;
   final String hintText;
   final ValueChanged<String> onChanged;
+  final bool loading;
 
   const AppSearchField({
     super.key,
     required this.controller,
     required this.hintText,
     required this.onChanged,
+    this.loading = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(20),
+      borderSide: BorderSide(color: scheme.outlineVariant),
+    );
     return SizedBox(
       height: fieldHeight,
       child: TextField(
@@ -66,24 +77,33 @@ class AppSearchField extends StatelessWidget {
           hintText: hintText,
           isDense: true,
           filled: true,
-          fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+          fillColor: scheme.surfaceContainerLow,
           contentPadding: const EdgeInsets.symmetric(vertical: 8),
-          prefixIcon: const Icon(Icons.search, size: 20),
-          prefixIconConstraints: const BoxConstraints(minWidth: 38),
-          suffixIcon: controller.text.isEmpty
-              ? null
-              : IconButton(
-                  tooltip: '清除搜索',
-                  icon: const Icon(Icons.close, size: 18),
-                  onPressed: () {
-                    controller.clear();
-                    onChanged('');
-                  },
-                ),
-          suffixIconConstraints: const BoxConstraints(minWidth: 38),
-          border: const OutlineInputBorder(
-            borderRadius: BorderRadius.all(Radius.circular(20)),
-            borderSide: BorderSide.none,
+          prefixIcon: Icon(Icons.search_rounded, size: 20, color: scheme.primary),
+          prefixIconConstraints: const BoxConstraints(minWidth: 40),
+          suffixIcon: loading
+              ? const Padding(
+                  padding: EdgeInsets.all(11),
+                  child: SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : controller.text.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: '清除搜索',
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      onPressed: () {
+                        controller.clear();
+                        onChanged('');
+                      },
+                    ),
+          suffixIconConstraints: const BoxConstraints(minWidth: 40),
+          border: border,
+          enabledBorder: border,
+          focusedBorder: border.copyWith(
+            borderSide: BorderSide(color: scheme.primary, width: 1.5),
           ),
         ),
       ),

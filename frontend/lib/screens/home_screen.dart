@@ -1,9 +1,11 @@
 
+import 'dart:async';
 import 'dart:io' show File;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../api.dart';
+import '../app_widgets.dart';
 import '../input_formatters.dart';
 import '../models.dart';
 import '../notifications.dart';
@@ -31,11 +33,19 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Task> _allTasks = [];
   List<Task> _tasks = [];
   final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
+  Set<int>? _searchTaskIds;
+  int _searchRequest = 0;
+  bool _searching = false;
   bool _loading = true;
   FilterReq _filter = const FilterReq();
   String _filterSummary = '';
   bool _backendOk = true;
-  final List<Task> _selected = [];
+  final Set<int> _selectedIds = <int>{};
+
+  List<Task> get _selectedTasks => _allTasks
+      .where((task) => task.id != null && _selectedIds.contains(task.id))
+      .toList();
   List<double>? _columnWidths;
   List<double>? _savedColumnWidths;
   double? _tableAvailableWidth;
@@ -52,6 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _persistColumnWidths();
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -59,6 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _ensureBackend() async {
     final ok = await Api.health();
+    if (!mounted) return;
     setState(() {
       _backendOk = ok;
     });
@@ -74,24 +86,45 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _reload() async {
-    setState(() => _loading = true);
+    if (mounted) setState(() => _loading = true);
     try {
-      _allTasks = await Api.listTasks(_filter);
-      _rebuildVisibleTasks();
-    } catch (e) {
+      final tasks = await Api.listTasks(_filter);
+      final query = _searchController.text.trim();
+      final searchIds =
+          query.isEmpty ? null : await Api.searchTaskIds(query);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('加载失败: $e')));
+      setState(() {
+        _allTasks = tasks;
+        final validIds = tasks.where((task) => task.id != null).map((task) => task.id!).toSet();
+        _selectedIds.removeWhere((id) => !validIds.contains(id));
+        _searchTaskIds = searchIds;
+        _searching = false;
+        _rebuildVisibleTasks();
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _searching = false;
+        _loading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('加载失败: $error')),
+      );
     }
-    setState(() => _loading = false);
   }
 
   void _rebuildVisibleTasks() {
-    final query = _searchController.text;
-    final matched = query.trim().isEmpty
+    final query = _searchController.text.trim();
+    final matched = query.isEmpty
         ? List<Task>.from(_allTasks)
-        : _allTasks
-            .where((task) => taskMatchesSearch(task, query))
-            .toList();
+        : _searchTaskIds == null
+            ? _allTasks
+                .where((task) => taskMatchesSearch(task, query))
+                .toList()
+            : _allTasks
+                .where((task) => _searchTaskIds!.contains(task.id))
+                .toList();
     _tasks = sortTasks(
       matched,
       column: _sortColumn,
@@ -99,8 +132,41 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _searchTasks(String _) {
-    setState(_rebuildVisibleTasks);
+  void _searchTasks(String value) {
+    _searchDebounce?.cancel();
+    final request = ++_searchRequest;
+    final query = value.trim();
+    if (query.isEmpty) {
+      setState(() {
+        _searchTaskIds = null;
+        _searching = false;
+        _rebuildVisibleTasks();
+      });
+      return;
+    }
+    setState(() => _searching = true);
+    _searchDebounce = Timer(const Duration(milliseconds: 240), () async {
+      try {
+        final ids = await Api.searchTaskIds(query);
+        if (!mounted || request != _searchRequest ||
+            _searchController.text.trim() != query) {
+          return;
+        }
+        setState(() {
+          _searchTaskIds = ids;
+          _searching = false;
+          _rebuildVisibleTasks();
+        });
+      } catch (_) {
+        if (!mounted || request != _searchRequest) return;
+        setState(() {
+          // 索引服务异常时保留本地搜索兜底，不影响用户继续使用。
+          _searchTaskIds = null;
+          _searching = false;
+          _rebuildVisibleTasks();
+        });
+      }
+    });
   }
 
   void _toast(String s) {
@@ -118,7 +184,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _deleteSelected() async {
-    final sel = _selected;
+    final sel = _selectedTasks;
     if (sel.isEmpty) {
       _toast('请先选择要删除的条目');
       return;
@@ -142,7 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _toast('删除失败 ${t.meetingNo}/${t.taskNo}: $e');
       }
     }
-    _selected.clear();
+    _selectedIds.clear();
     await _reload();
   }
 
@@ -155,23 +221,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _addDelay() async {
-    final sel = _selected;
+    final sel = _selectedTasks;
     if (sel.length != 1) {
       _toast('请选中一条条目后添加延期');
       return;
     }
     await _openDelayScreen(sel.first);
-    _selected.clear();
+    _selectedIds.clear();
   }
 
   Future<void> _delDelay() async {
-    final sel = _selected;
+    final sel = _selectedTasks;
     if (sel.length != 1) {
       _toast('请选中一条条目查看/删除延期');
       return;
     }
     await _openDelayScreen(sel.first);
-    _selected.clear();
+    _selectedIds.clear();
   }
 
   Future<void> _openFilter() async {
@@ -437,7 +503,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final bytes = await File(path).readAsBytes();
     try {
       await Api.importAllFiles(bytes, res.files.single.name);
-      _selected.clear();
+      _selectedIds.clear();
       _toast('数据库和附件导入成功');
       await _reload();
     } catch (e) {
@@ -510,21 +576,28 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildHeaderRow(List<double> widths) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
-      color: Colors.grey[200],
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+      ),
       child: Row(
         children: [
           SizedBox(
             width: taskSelectionWidth,
             child: Checkbox(
-              value: _tasks.isNotEmpty && _selected.length == _tasks.length,
+              value: _tasks.isNotEmpty &&
+                  _tasks.every((task) => _selectedIds.contains(task.id)),
               onChanged: (v) {
                 setState(() {
                   if (v == true) {
-                    _selected.clear();
-                    _selected.addAll(_tasks);
+                    _selectedIds.clear();
+                    _selectedIds.addAll(
+                      _tasks.where((task) => task.id != null).map((task) => task.id!),
+                    );
                   } else {
-                    _selected.clear();
+                    _selectedIds.clear();
                   }
                 });
               },
@@ -549,7 +622,9 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Container(
               decoration: BoxDecoration(
                 border: Border(
-                  right: BorderSide(color: Colors.grey.shade300),
+                  right: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
                 ),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
@@ -594,14 +669,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildDataRow(int index, Task t, List<double> widths) {
     final lastDelay = t.delays.isNotEmpty ? t.delays.last : null;
-    final isSelected = _selected.any((x) => x.id == t.id);
+    final isSelected = t.id != null && _selectedIds.contains(t.id);
     final cellTexts = [
       '${index + 1}', t.meetingNo, t.taskNo.toString(), t.taskDesc, t.dept,
       t.owner, t.requiredDate, t.actualDate, lastDelay?.delayDate ?? '',
       lastDelay?.delayReason ?? '', t.hasAttachment ? '有' : '无', t.remark,
     ];
+    final scheme = Theme.of(context).colorScheme;
+    final rowColor = isSelected
+        ? scheme.primary.withValues(alpha: 0.10)
+        : index.isOdd
+            ? scheme.surfaceContainerLow.withValues(alpha: 0.55)
+            : scheme.surface;
     return Container(
-      color: isSelected ? Colors.blue.withValues(alpha: 0.1) : null,
+      decoration: BoxDecoration(
+        color: rowColor,
+        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+      ),
       child: Row(
         children: [
           SizedBox(
@@ -611,9 +695,9 @@ class _HomeScreenState extends State<HomeScreen> {
               onChanged: (v) {
                 setState(() {
                   if (v == true) {
-                    _selected.add(t);
+                    if (t.id != null) _selectedIds.add(t.id!);
                   } else {
-                    _selected.removeWhere((x) => x.id == t.id);
+                    _selectedIds.remove(t.id);
                   }
                 });
               },
@@ -653,35 +737,67 @@ class _HomeScreenState extends State<HomeScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 1050;
-        Widget action(IconData icon, String label, VoidCallback callback, {bool primary = false}) {
+        final scheme = Theme.of(context).colorScheme;
+        Widget action(
+          IconData icon,
+          String label,
+          VoidCallback callback, {
+          bool primary = false,
+        }) {
           if (compact) {
-            return IconButton(icon: Icon(icon), tooltip: label, onPressed: callback);
+            return IconButton(
+              icon: Icon(icon),
+              tooltip: label,
+              color: primary ? scheme.primary : scheme.onSurfaceVariant,
+              onPressed: callback,
+            );
           }
           return primary
-              ? FilledButton.icon(onPressed: callback, icon: Icon(icon), label: Text(label))
-              : OutlinedButton.icon(onPressed: callback, icon: Icon(icon), label: Text(label));
+              ? FilledButton.icon(
+                  onPressed: callback,
+                  icon: Icon(icon),
+                  label: Text(label),
+                )
+              : OutlinedButton.icon(
+                  onPressed: callback,
+                  icon: Icon(icon),
+                  label: Text(label),
+                );
         }
 
         return Row(
           children: [
-            action(Icons.add, '添加条目', _addTask, primary: true),
-            const SizedBox(width: 6),
-            action(Icons.delete_outline, '删除条目', _deleteSelected),
-            const SizedBox(width: 6),
-            action(Icons.more_time, '添加延期', _addDelay),
-            const SizedBox(width: 6),
-            action(Icons.history_toggle_off, '查看/删除延期', _delDelay),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                _filterSummary.isEmpty ? '' : '筛选: $_filterSummary',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.grey),
-              ),
-            ),
+            action(Icons.add_rounded, '添加条目', _addTask, primary: true),
             const SizedBox(width: 8),
-            Text('共 ${_tasks.length} 条', style: const TextStyle(color: Colors.grey)),
+            action(Icons.delete_outline_rounded, '删除条目', _deleteSelected),
+            const SizedBox(width: 8),
+            action(Icons.more_time_rounded, '添加延期', _addDelay),
+            const SizedBox(width: 8),
+            action(Icons.history_toggle_off_rounded, '查看/删除延期', _delDelay),
+            const SizedBox(width: 14),
+            if (_filterSummary.isNotEmpty)
+              Flexible(
+                child: AppStatusPill(
+                  icon: Icons.filter_alt_rounded,
+                  label: _filterSummary,
+                  color: scheme.secondary,
+                ),
+              )
+            else
+              const Spacer(),
+            if (_filterSummary.isNotEmpty) const Spacer(),
+            if (_selectedIds.isNotEmpty) ...[
+              AppStatusPill(
+                icon: Icons.check_circle_outline_rounded,
+                label: '已选 ${_selectedIds.length} 条',
+                color: scheme.tertiary,
+              ),
+              const SizedBox(width: 8),
+            ],
+            AppStatusPill(
+              icon: Icons.dataset_outlined,
+              label: '共 ${_tasks.length} 条',
+            ),
           ],
         );
       },
@@ -697,6 +813,7 @@ class _HomeScreenState extends State<HomeScreen> {
           controller: _searchController,
           hintText: '搜索任务（空格分词、引号短语、-排除）',
           onChanged: _searchTasks,
+          loading: _searching,
         ),
         actions: [
           NotificationButton(
@@ -730,38 +847,71 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          Container(
-            color: Colors.black.withValues(alpha: 0.04),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          AppSurface(
+            margin: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            radius: 14,
+            elevated: true,
             child: _buildActionBar(),
           ),
           if (!_backendOk)
-            const Padding(
-              padding: EdgeInsets.all(8),
-              child: Text('本地服务未连接，请确认 hyrwbz_backend.exe 位于应用目录。', style: TextStyle(color: Colors.red)),
+            const AppInfoBanner(
+              icon: Icons.cloud_off_rounded,
+              message: '本地服务未连接，请确认 hyrwbz_backend.exe 位于应用目录。',
+              color: Colors.redAccent,
             ),
           Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _tasks.isEmpty
-                    ? const Center(child: Text('暂无数据，点击「添加条目」开始'))
-                    : LayoutBuilder(
-                        builder: (context, constraints) {
-                          final widths = _resolveColumnWidths(constraints.maxWidth);
-                          return Column(
-                            children: [
-                              _buildHeaderRow(widths),
-                              Expanded(
-                                child: ListView.builder(
-                                  itemCount: _tasks.length,
-                                  itemBuilder: (context, index) =>
-                                      _buildDataRow(index, _tasks[index], widths),
+            child: AppSurface(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              padding: EdgeInsets.zero,
+              radius: 14,
+              elevated: true,
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _tasks.isEmpty
+                      ? AppEmptyState(
+                          icon: Icons.assignment_outlined,
+                          title: '暂无任务数据',
+                          message: _filterSummary.isEmpty
+                              ? '点击“添加条目”创建第一条会议任务。'
+                              : '当前筛选条件下没有匹配的任务，请调整筛选条件。',
+                          action: _filterSummary.isEmpty
+                              ? FilledButton.icon(
+                                  onPressed: _addTask,
+                                  icon: const Icon(Icons.add_rounded),
+                                  label: const Text('添加条目'),
+                                )
+                              : OutlinedButton.icon(
+                                  onPressed: _openFilter,
+                                  icon: const Icon(Icons.tune_rounded),
+                                  label: const Text('调整筛选'),
                                 ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
+                        )
+                      : LayoutBuilder(
+                          builder: (context, constraints) {
+                            final widths =
+                                _resolveColumnWidths(constraints.maxWidth);
+                            return Column(
+                              children: [
+                                _buildHeaderRow(widths),
+                                Expanded(
+                                  child: Scrollbar(
+                                    child: ListView.builder(
+                                      itemCount: _tasks.length,
+                                      itemBuilder: (context, index) =>
+                                          _buildDataRow(
+                                        index,
+                                        _tasks[index],
+                                        widths,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+            ),
           ),
         ],
       ),
@@ -878,7 +1028,11 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('添加条目'),
+      title: const AppSectionTitle(
+        icon: Icons.add_task_rounded,
+        title: '添加条目',
+        subtitle: '填写任务信息并可同时添加附件',
+      ),
       content: SizedBox(
         width: 520,
         child: SingleChildScrollView(
@@ -1007,7 +1161,11 @@ class _ViewTaskDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('条目详情 - ${task.meetingNo}/${task.taskNo}'),
+      title: AppSectionTitle(
+        icon: Icons.assignment_outlined,
+        title: '条目详情',
+        subtitle: '${task.meetingNo} / ${task.taskNo}',
+      ),
       content: SizedBox(
         width: 600,
         child: SingleChildScrollView(

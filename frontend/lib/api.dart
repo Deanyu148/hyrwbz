@@ -50,6 +50,13 @@ class Api {
         .toList();
   }
 
+  static Future<Set<int>> searchTaskIds(String query) async {
+    final reply = await _call('search.tasks', params: {'query': query});
+    return (reply.result as List)
+        .map((value) => (value as num).toInt())
+        .toSet();
+  }
+
   static Future<Task> createTask(Task task) async {
     final reply = await _call('task.create', params: task.toJson());
     return Task.fromJson(Map<String, dynamic>.from(reply.result as Map));

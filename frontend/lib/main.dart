@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:window_manager/window_manager.dart';
 import 'api.dart';
+import 'app_theme.dart';
 import 'backend_manager.dart';
 import 'screens/home_screen.dart';
 import 'window_state.dart';
@@ -64,11 +65,7 @@ class HyrwbzApp extends StatelessWidget {
     return MaterialApp(
       title: '会议任务管理跟踪系统',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
-      ),
+      theme: AppTheme.light(),
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
       localizationsDelegates: const [

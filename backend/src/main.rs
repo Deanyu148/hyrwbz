@@ -10,6 +10,7 @@ mod import_export;
 mod models;
 mod notifications;
 mod rpc;
+mod search_index;
 mod service;
 
 /// 解析 --socket-path 与 --parent-pid。
@@ -71,7 +72,10 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(parent_watchdog(parent_pid));
     }
     let pool = db::init(&db::default_db_path()).await?;
-    let notification_store = notifications::NotificationStore::open().await?;
+    let (notification_store, search_index) = tokio::try_join!(
+        notifications::NotificationStore::open(),
+        search_index::SearchIndex::open(&pool),
+    )?;
     let notification_store_for_refresh = notification_store.clone();
     let pool_for_refresh = pool.clone();
     tokio::spawn(async move {
@@ -85,5 +89,5 @@ async fn main() -> anyhow::Result<()> {
     });
     #[cfg(debug_assertions)]
     tracing::info!("listening on local socket {}", socket_path);
-    rpc::serve(&socket_path, pool, notification_store).await
+    rpc::serve(&socket_path, pool, notification_store, search_index).await
 }

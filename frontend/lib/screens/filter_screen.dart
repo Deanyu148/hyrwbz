@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../input_formatters.dart';
+import '../app_widgets.dart';
 import '../models.dart';
 import 'date_picker_dialog.dart';
 
@@ -63,7 +64,11 @@ class _FilterScreenState extends State<FilterScreen> {
         .toDouble();
     return AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-      title: const Text('统计筛选'),
+      title: const AppSectionTitle(
+        icon: Icons.tune_rounded,
+        title: '统计筛选',
+        subtitle: '组合多个条件快速定位任务',
+      ),
       content: SizedBox(
         width: dialogWidth,
         child: SingleChildScrollView(

@@ -49,7 +49,7 @@ void main() {
     expect(find.text('通知2'), findsOneWidget);
     expect(find.text('通知3'), findsNothing);
     expect(find.text('还有 4 条'), findsOneWidget);
-    expect(find.byIcon(Icons.done_all), findsOneWidget);
+    expect(find.byIcon(Icons.done_all_rounded), findsOneWidget);
   });
 
   testWidgets('full notification list is not limited by compact preview rules', (tester) async {

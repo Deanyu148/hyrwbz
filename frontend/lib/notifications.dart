@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'api.dart';
+import 'app_widgets.dart';
 import 'notification_model.dart';
 import 'notification_search.dart';
 import 'search_field.dart';
@@ -39,7 +40,10 @@ class NotificationListView extends StatelessWidget {
           child: InkWell(
             key: ValueKey('full-notification-${item.id}'),
             onTap: () => onTap(item),
-            child: Padding(
+            child: Container(
+              color: item.isRead
+                  ? Colors.transparent
+                  : Theme.of(context).colorScheme.primary.withValues(alpha: 0.035),
               padding: const EdgeInsets.symmetric(
                 horizontal: 16,
                 vertical: _verticalPadding,
@@ -122,37 +126,40 @@ class CompactNotificationPanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(
-          height: _headerHeight,
-          child: Padding(
-            padding: const EdgeInsets.only(left: 8, right: 2),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    '通知',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
+        ColoredBox(
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          child: SizedBox(
+            height: _headerHeight,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 10, right: 4),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      '通知',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-                IconButton(
-                  tooltip: '全部已读',
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 30,
-                    height: 30,
+                  IconButton(
+                    tooltip: '全部已读',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 30,
+                      height: 30,
+                    ),
+                    onPressed: notifications.any((item) => !item.isRead)
+                        ? onMarkAllRead
+                        : null,
+                    icon: const Icon(Icons.done_all_rounded, size: 17),
                   ),
-                  onPressed: notifications.any((item) => !item.isRead)
-                      ? onMarkAllRead
-                      : null,
-                  icon: const Icon(Icons.done_all, size: 17),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -355,12 +362,23 @@ class _NotificationScreenState extends State<NotificationScreen> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : NotificationListView(
-              notifications: _notifications,
-              onTap: _open,
-            ),
+      body: AppSurface(
+        margin: const EdgeInsets.all(12),
+        padding: EdgeInsets.zero,
+        elevated: true,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _notifications.isEmpty
+                ? const AppEmptyState(
+                    icon: Icons.notifications_none_rounded,
+                    title: '暂无通知',
+                    message: '当前没有需要处理的到期或逾期提醒。',
+                  )
+                : NotificationListView(
+                    notifications: _notifications,
+                    onTap: _open,
+                  ),
+      ),
     );
   }
 }
@@ -486,11 +504,21 @@ class _NotificationHistoryScreenState extends State<NotificationHistoryScreen> {
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+          AppSurface(
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            elevated: true,
             child: Row(
               children: [
-                const Text('通知时间'),
+                Icon(
+                  Icons.date_range_rounded,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  '通知时间',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(width: 12),
                 SizedBox(
                   width: 170,
@@ -539,21 +567,32 @@ class _NotificationHistoryScreenState extends State<NotificationHistoryScreen> {
                   const SizedBox(width: 8),
                   FilledButton.icon(
                     onPressed: _load,
-                    icon: const Icon(Icons.search),
+                    icon: const Icon(Icons.search_rounded),
                     label: const Text('查询'),
                   ),
-                ],
+                ] else
+                  const Spacer(),
               ],
             ),
           ),
-          const Divider(height: 1),
           Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : NotificationListView(
-                    notifications: _notifications,
-                    onTap: _open,
-                  ),
+            child: AppSurface(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              padding: EdgeInsets.zero,
+              elevated: true,
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _notifications.isEmpty
+                      ? const AppEmptyState(
+                          icon: Icons.history_rounded,
+                          title: '暂无历史通知',
+                          message: '所选时间范围内没有历史通知记录。',
+                        )
+                      : NotificationListView(
+                          notifications: _notifications,
+                          onTap: _open,
+                        ),
+            ),
           ),
         ],
       ),

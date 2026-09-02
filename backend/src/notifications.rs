@@ -4,14 +4,19 @@ use crate::service;
 use anyhow::Result;
 use chrono::{Local, NaiveDate};
 use serde::Serialize;
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+};
 use sqlx::{Pool, Row, Sqlite};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
-pub const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+pub const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+const LIST_REFRESH_TTL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Notification {
@@ -30,6 +35,7 @@ pub struct Notification {
 pub struct NotificationStore {
     db: Pool<Sqlite>,
     refresh_lock: Arc<Mutex<()>>,
+    last_refresh: Arc<Mutex<Option<Instant>>>,
 }
 
 impl NotificationStore {
@@ -42,12 +48,15 @@ impl NotificationStore {
         if let Some(parent) = Path::new(path).parent() {
             std::fs::create_dir_all(parent).ok();
         }
-        let db = sqlx::sqlite::SqlitePoolOptions::new()
+        let options = SqliteConnectOptions::from_str(&format!("sqlite://{}", path))?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .busy_timeout(Duration::from_secs(10));
+        let db = SqlitePoolOptions::new()
+            .min_connections(1)
             .max_connections(2)
-            .connect_with(
-                sqlx::sqlite::SqliteConnectOptions::from_str(&format!("sqlite://{}", path))?
-                    .create_if_missing(true),
-            )
+            .connect_with(options)
             .await?;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS notifications (
@@ -99,11 +108,33 @@ impl NotificationStore {
         Ok(Self {
             db,
             refresh_lock: Arc::new(Mutex::new(())),
+            last_refresh: Arc::new(Mutex::new(None)),
         })
     }
 
     pub async fn refresh(&self, core_db: &Db) -> Result<()> {
+        self.refresh_inner(core_db, true).await
+    }
+
+    pub async fn invalidate(&self) {
+        *self.last_refresh.lock().await = None;
+    }
+
+    async fn refresh_if_stale(&self, core_db: &Db) -> Result<()> {
+        self.refresh_inner(core_db, false).await
+    }
+
+    async fn refresh_inner(&self, core_db: &Db, force: bool) -> Result<()> {
         let _guard = self.refresh_lock.lock().await;
+        if !force {
+            let last_refresh = self.last_refresh.lock().await;
+            if last_refresh
+                .as_ref()
+                .is_some_and(|instant| instant.elapsed() < LIST_REFRESH_TTL)
+            {
+                return Ok(());
+            }
+        }
         let today = Local::now().date_naive();
         // 始终扫描核心数据库中的全部任务，不受主界面当前筛选条件影响。
         let mut tasks = service::list_tasks(core_db, &FilterReq::default())
@@ -236,11 +267,12 @@ impl NotificationStore {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
+        *self.last_refresh.lock().await = Some(Instant::now());
         Ok(())
     }
 
     pub async fn list(&self, core_db: &Db) -> Result<Vec<Notification>> {
-        self.refresh(core_db).await?;
+        self.refresh_if_stale(core_db).await?;
         let rows = sqlx::query(
             "SELECT id, task_id, meeting_no, task_no, expected_date, remaining_days,
                     message, notification_date, is_read
@@ -257,7 +289,7 @@ impl NotificationStore {
         from: Option<String>,
         to: Option<String>,
     ) -> Result<Vec<Notification>> {
-        self.refresh(core_db).await?;
+        self.refresh_if_stale(core_db).await?;
         let mut sql = String::from(
             "SELECT id, task_id, meeting_no, task_no, expected_date, remaining_days,
                     message, notification_date, is_read

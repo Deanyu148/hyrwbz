@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api.dart';
+import '../app_widgets.dart';
 import '../models.dart';
 import 'date_picker_dialog.dart';
 
@@ -33,13 +34,19 @@ class _DelayScreenState extends State<DelayScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (mounted) setState(() => _loading = true);
     try {
-      _delays = await Api.listDelays(widget.task.id!);
-    } catch (e) {
-      _toast('加载延期失败: $e');
+      final delays = await Api.listDelays(widget.task.id!);
+      if (!mounted) return;
+      setState(() {
+        _delays = delays;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      _toast('加载延期失败: $error');
     }
-    setState(() => _loading = false);
   }
 
   void _toast(String s) {
@@ -82,7 +89,11 @@ class _DelayScreenState extends State<DelayScreen> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('延期记录 - ${widget.task.meetingNo}/${widget.task.taskNo}'),
+      title: AppSectionTitle(
+        icon: Icons.more_time_rounded,
+        title: '延期记录',
+        subtitle: '${widget.task.meetingNo} / ${widget.task.taskNo}',
+      ),
       content: SizedBox(
         width: 600,
         child: Column(

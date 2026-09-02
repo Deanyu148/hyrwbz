@@ -1,13 +1,15 @@
 use crate::db::Db;
 use crate::models::{CreateDelayReq, FilterReq, SetLockedMeetingReq, UpdateTaskReq};
-use crate::{excel, import_export, notifications, service};
+use crate::{excel, import_export, notifications, search_index, service};
 use interprocess::local_socket::tokio::Stream;
 use interprocess::local_socket::traits::tokio::Listener as _;
 use interprocess::local_socket::{GenericFilePath, ListenerOptions, ToFsName};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::Mutex;
 
 const MAGIC: &[u8; 4] = b"HYRW";
 const VERSION: u16 = 1;
@@ -77,11 +79,16 @@ struct NotificationHistoryParam {
     from: Option<String>,
     to: Option<String>,
 }
+#[derive(Debug, Deserialize)]
+struct SearchParam {
+    query: String,
+}
 
 pub async fn serve(
     socket_path: &str,
     db: Db,
     notification_store: notifications::NotificationStore,
+    search_index: search_index::SearchIndex,
 ) -> anyhow::Result<()> {
     let name = socket_path.to_fs_name::<GenericFilePath>()?;
     let listener = ListenerOptions::new().name(name).create_tokio()?;
@@ -89,8 +96,11 @@ pub async fn serve(
         let stream = listener.accept().await?;
         let db = db.clone();
         let notification_store = notification_store.clone();
+        let search_index = search_index.clone();
         tokio::spawn(async move {
-            if let Err(_error) = handle_connection(stream, db, notification_store).await {
+            if let Err(_error) =
+                handle_connection(stream, db, notification_store, search_index).await
+            {
                 #[cfg(debug_assertions)]
                 tracing::warn!("local RPC connection closed: {}", _error);
             }
@@ -102,53 +112,86 @@ async fn handle_connection(
     stream: Stream,
     db: Db,
     notification_store: notifications::NotificationStore,
+    search_index: search_index::SearchIndex,
 ) -> anyhow::Result<()> {
-    let (mut reader, mut writer) = tokio::io::split(stream);
+    let (mut reader, writer) = tokio::io::split(stream);
+    let writer = Arc::new(Mutex::new(writer));
     loop {
         let frame = match read_frame(&mut reader).await {
             Ok(frame) => frame,
             Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
             Err(error) => return Err(error.into()),
         };
-        let response = match serde_json::from_value::<RequestHeader>(frame.header) {
-            Ok(request) => dispatch_with_notifications(
-                &db,
-                &notification_store,
-                request,
-                frame.binary,
-            )
-            .await,
-            Err(error) => error_frame(0, "protocol", format!("invalid request header: {error}")),
-        };
-        write_frame(&mut writer, &response).await?;
+        let db = db.clone();
+        let notification_store = notification_store.clone();
+        let search_index = search_index.clone();
+        let writer = Arc::clone(&writer);
+        tokio::spawn(async move {
+            let response = match serde_json::from_value::<RequestHeader>(frame.header) {
+                Ok(request) => {
+                    dispatch_with_notifications(
+                        &db,
+                        &notification_store,
+                        &search_index,
+                        request,
+                        frame.binary,
+                    )
+                    .await
+                }
+                Err(error) => {
+                    error_frame(0, "protocol", format!("invalid request header: {error}"))
+                }
+            };
+            let mut writer = writer.lock().await;
+            if let Err(_error) = write_frame(&mut *writer, &response).await {
+                #[cfg(debug_assertions)]
+                tracing::warn!("local RPC response write failed: {}", _error);
+            }
+        });
     }
 }
 
 #[cfg(test)]
 async fn dispatch(db: &Db, request: RequestHeader, binary: Vec<u8>) -> Frame {
-    dispatch_inner(db, None, request, binary).await
+    dispatch_inner(db, None, None, request, binary).await
 }
 
 async fn dispatch_with_notifications(
     db: &Db,
     notification_store: &notifications::NotificationStore,
+    search_index: &search_index::SearchIndex,
     request: RequestHeader,
     binary: Vec<u8>,
 ) -> Frame {
-    dispatch_inner(db, Some(notification_store), request, binary).await
+    dispatch_inner(
+        db,
+        Some(notification_store),
+        Some(search_index),
+        request,
+        binary,
+    )
+    .await
 }
 
 async fn dispatch_inner(
     db: &Db,
     notification_store: Option<&notifications::NotificationStore>,
+    search_index: Option<&search_index::SearchIndex>,
     request: RequestHeader,
     binary: Vec<u8>,
 ) -> Frame {
     let id = request.id;
+    let method = request.method.clone();
     let result: Result<(Value, Vec<u8>), service::ServiceError> = async {
         let value = match request.method.as_str() {
             "system.health" => json!({"ok": true, "protocol": VERSION}),
             "task.list" => serde_json::to_value(service::list_tasks(db, &decode(request.params)?).await?).map_err(service::ServiceError::internal)?,
+            "search.tasks" => {
+                let index = search_index.ok_or_else(|| service::ServiceError::internal("search index unavailable"))?;
+                let param: SearchParam = decode(request.params)?;
+                serde_json::to_value(index.search_task_ids(db, &param.query).await.map_err(service::ServiceError::internal)?)
+                    .map_err(service::ServiceError::internal)?
+            }
             "task.create" => serde_json::to_value(service::create_task(db, decode(request.params)?).await?).map_err(service::ServiceError::internal)?,
             "task.update" => {
                 let param: UpdateTaskParam = decode(request.params)?;
@@ -265,10 +308,46 @@ async fn dispatch_inner(
         Ok((value, Vec::new()))
     }.await;
 
+    if result.is_ok() {
+        if method_invalidates_search(&method) {
+            if let Some(index) = search_index {
+                index.invalidate();
+            }
+        }
+        if method_invalidates_notifications(&method) {
+            if let Some(store) = notification_store {
+                store.invalidate().await;
+            }
+        }
+    }
     match result {
         Ok((value, payload)) => success_frame(id, value, payload),
         Err(error) => error_frame(id, error.code, error.message),
     }
+}
+
+fn method_invalidates_search(method: &str) -> bool {
+    matches!(
+        method,
+        "task.create"
+            | "task.update"
+            | "task.delete"
+            | "delay.create"
+            | "delay.delete"
+            | "attachment.upload"
+            | "attachment.delete"
+            | "import.excel"
+            | "import.csv"
+            | "import.database"
+            | "import.all_files"
+    )
+}
+
+fn method_invalidates_notifications(method: &str) -> bool {
+    matches!(
+        method,
+        "task.create" | "task.update" | "task.delete" | "delay.create" | "delay.delete"
+    )
 }
 
 async fn reset_notifications_after_import(
@@ -500,6 +579,49 @@ mod tests {
         std::fs::remove_file(db_path).ok();
     }
 
+    #[tokio::test]
+    async fn task_search_rpc_uses_separate_index_database() {
+        let unique = uuid::Uuid::new_v4();
+        let db_path = std::env::temp_dir().join(format!("hyrwbz_rpc_search_core_{unique}.db"));
+        let index_path =
+            std::env::temp_dir().join(format!("hyrwbz_rpc_search_index_{unique}.db"));
+        let db = crate::db::init(db_path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO tasks
+             (meeting_no, task_no, task_desc, dept, owner, required_date, actual_date, remark)
+             VALUES ('纪要〔2026〕1号', 1, '搜索目标', '工程部', '张三', '', '进行中', '')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let index = search_index::SearchIndex::open_at(
+            &db,
+            index_path.to_string_lossy().as_ref(),
+        )
+        .await
+        .unwrap();
+        let response = dispatch_inner(
+            &db,
+            None,
+            Some(&index),
+            RequestHeader {
+                id: 9,
+                method: "search.tasks".to_string(),
+                params: json!({"query": "搜索目标 张三"}),
+            },
+            Vec::new(),
+        )
+        .await;
+        assert_eq!(response.header["result"], json!([1]));
+
+        drop(index);
+        db.close().await;
+        std::fs::remove_file(db_path).ok();
+        std::fs::remove_file(index_path).ok();
+    }
+
     #[cfg(windows)]
     #[tokio::test]
     async fn windows_local_socket_health_smoke() {
@@ -513,7 +635,16 @@ mod tests {
             .unwrap();
         let server_path = socket_path.clone();
         let notification_store = notifications::NotificationStore::open().await.unwrap();
-        let server = tokio::spawn(async move { serve(&server_path, db, notification_store).await });
+        let search_path = std::env::temp_dir().join(format!("hyrwbz_search_{unique}.db"));
+        let search_index = search_index::SearchIndex::open_at(
+            &db,
+            search_path.to_string_lossy().as_ref(),
+        )
+        .await
+        .unwrap();
+        let server = tokio::spawn(async move {
+            serve(&server_path, db, notification_store, search_index).await
+        });
 
         let mut client = None;
         for _ in 0..50 {
@@ -539,5 +670,6 @@ mod tests {
         server.abort();
         drop(client);
         std::fs::remove_file(db_path).ok();
+        std::fs::remove_file(search_path).ok();
     }
 }

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../api.dart';
+import '../app_widgets.dart';
 import '../attachment_launcher.dart';
 import '../input_formatters.dart';
 import '../models.dart';
@@ -61,19 +62,21 @@ class _EditScreenState extends State<EditScreen> {
   }
 
   Future<void> _loadLock() async {
-    final l = await Api.getLockedMeeting();
-    setState(() => _lock = l == widget.task.meetingNo);
+    final lockedMeeting = await Api.getLockedMeeting();
+    if (!mounted) return;
+    setState(() => _lock = lockedMeeting == widget.task.meetingNo);
   }
 
   Future<void> _loadAttachments() async {
     try {
-      final atts = await Api.listAttachments(widget.task.id!);
+      final attachments = await Api.listAttachments(widget.task.id!);
+      if (!mounted) return;
       setState(() {
-        _attachments = atts;
+        _attachments = attachments;
         _loadingAttachments = false;
       });
-    } catch (e) {
-      setState(() => _loadingAttachments = false);
+    } catch (_) {
+      if (mounted) setState(() => _loadingAttachments = false);
     }
   }
 
@@ -298,7 +301,11 @@ class _EditScreenState extends State<EditScreen> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('编辑条目 #${widget.task.id}'),
+      title: AppSectionTitle(
+        icon: Icons.edit_note_rounded,
+        title: '编辑条目',
+        subtitle: '${widget.task.meetingNo} / ${widget.task.taskNo}',
+      ),
       content: SizedBox(
         width: 560,
         child: SingleChildScrollView(
