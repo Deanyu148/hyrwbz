@@ -119,6 +119,7 @@ async fn handle_connection(
     }
 }
 
+#[cfg(test)]
 async fn dispatch(db: &Db, request: RequestHeader, binary: Vec<u8>) -> Frame {
     dispatch_inner(db, None, request, binary).await
 }

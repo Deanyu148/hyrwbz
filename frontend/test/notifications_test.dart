@@ -20,14 +20,18 @@ void main() {
     final notifications = List.generate(6, (index) => notification(index + 1));
     await tester.pumpWidget(
       MaterialApp(
-        home: SizedBox(
-          width: 320,
-          height: 297,
-          child: NotificationListView(
-            notifications: notifications,
-            compact: true,
-            onMarkAllRead: () async {},
-            onTap: (_) async {},
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 320,
+              height: 297,
+              child: NotificationListView(
+                notifications: notifications,
+                compact: true,
+                onMarkAllRead: () async {},
+                onTap: (_) async {},
+              ),
+            ),
           ),
         ),
       ),

@@ -76,9 +76,9 @@ async fn main() -> anyhow::Result<()> {
     let pool_for_refresh = pool.clone();
     tokio::spawn(async move {
         loop {
-            if let Err(error) = notification_store_for_refresh.refresh(&pool_for_refresh).await {
+            if let Err(_error) = notification_store_for_refresh.refresh(&pool_for_refresh).await {
                 #[cfg(debug_assertions)]
-                tracing::warn!("notification refresh failed: {}", error);
+                tracing::warn!("notification refresh failed: {}", _error);
             }
             tokio::time::sleep(notifications::REFRESH_INTERVAL).await;
         }
