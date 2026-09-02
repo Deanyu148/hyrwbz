@@ -140,15 +140,11 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
                   child: Row(
                     children: [
                       Expanded(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            _columnLabels[index],
-                            maxLines: 1,
-                            softWrap: false,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
+                        child: Text(
+                          _columnLabels[index],
+                          maxLines: 1,
+                          softWrap: false,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
                       _sortIcon(index),
@@ -208,7 +204,7 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
                 child: column == 10
                     ? task.hasAttachment
                         ? const Align(
-                            alignment: Alignment.centerLeft,
+                            alignment: Alignment.center,
                             child: Icon(Icons.attach_file_rounded, size: 19),
                           )
                         : const SizedBox.shrink()

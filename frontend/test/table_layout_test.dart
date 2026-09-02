@@ -120,4 +120,20 @@ void main() {
     expectFillsWidth(fitted, width);
   });
 
+  test('attachment column stays at its locked narrow width and cannot be dragged', () {
+    const width = 1600.0;
+    final original = computeTaskColumnWidths(width);
+    expect(original[taskAttachmentColumnIndex], taskAttachmentColumnWidth);
+
+    final resized = resizeTaskColumnWidths(
+      original,
+      taskAttachmentColumnIndex,
+      80,
+      width,
+    );
+    expect(resized[taskAttachmentColumnIndex], taskAttachmentColumnWidth);
+    expect(resized, original);
+    expectFillsWidth(resized, width);
+  });
+
 }

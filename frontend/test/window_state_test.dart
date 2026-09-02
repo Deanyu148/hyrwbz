@@ -33,7 +33,7 @@ void main() {
       maximized: false,
     );
     final bounds = WindowStateStore.correctedBounds(saved, const [display], display);
-    expect(bounds.width, 900);
+    expect(bounds.width, 1150);
     expect(bounds.height, 600);
   });
 

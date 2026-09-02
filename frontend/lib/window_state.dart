@@ -39,7 +39,7 @@ class SavedWindowState {
 }
 
 class WindowStateStore {
-  static const minimumSize = Size(900, 600);
+  static const minimumSize = Size(1150, 600);
 
   static File get file {
     final appData = Platform.environment['APPDATA'];

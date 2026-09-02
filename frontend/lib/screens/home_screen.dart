@@ -774,15 +774,11 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Row(
                 children: [
                   Expanded(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        softWrap: false,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
                   _sortIcon(index),
@@ -790,7 +786,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          if (index < _columnLabels.length - 1)
+          if (index < _columnLabels.length - 1 &&
+              index != taskAttachmentColumnIndex)
             Positioned(
               top: 0,
               right: 0,
@@ -866,7 +863,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: i == 10
                         ? t.hasAttachment
                             ? const Align(
-                                alignment: Alignment.centerLeft,
+                                alignment: Alignment.center,
                                 child: Icon(Icons.attach_file_rounded, size: 19),
                               )
                             : const SizedBox.shrink()

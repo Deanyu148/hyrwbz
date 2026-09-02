@@ -1,30 +1,34 @@
 const double taskSelectionWidth = 44.0;
 const double taskRemarkMinWidth = 100.0;
+const double taskAttachmentColumnWidth = 72.0;
+const int taskAttachmentColumnIndex = 10;
+
+// 最小宽度按表头文字和右侧排序图标预留，保证正常最小窗口下表头完整显示。
 const List<double> taskMinColumnWidths = [
-  38.0,
-  68.0,
-  50.0,
-  105.0,
-  58.0,
-  54.0,
+  64.0,
+  110.0,
+  86.0,
+  88.0,
+  88.0,
   76.0,
-  76.0,
-  76.0,
-  90.0,
-  42.0,
+  112.0,
+  112.0,
+  88.0,
+  88.0,
+  taskAttachmentColumnWidth,
 ];
 const List<double> taskPreferredColumnWidths = [
-  60.0,
-  120.0,
-  80.0,
-  200.0,
-  100.0,
-  80.0,
-  120.0,
-  120.0,
-  120.0,
-  150.0,
-  60.0,
+  72.0,
+  130.0,
+  96.0,
+  220.0,
+  110.0,
+  90.0,
+  130.0,
+  130.0,
+  105.0,
+  160.0,
+  taskAttachmentColumnWidth,
 ];
 
 const int taskColumnCount = 12;
@@ -58,6 +62,17 @@ bool isValidTaskColumnWidths(List<double>? widths) {
   return widths.every((width) => width.isFinite && width > 0);
 }
 
+List<double> _lockAttachmentColumn(List<double> widths, double target) {
+  final minimumTotal = taskAllMinColumnWidths.fold<double>(
+    0,
+    (sum, width) => sum + width,
+  );
+  if (target < minimumTotal) return widths;
+  final result = List<double>.from(widths);
+  result[taskAttachmentColumnIndex] = taskAttachmentColumnWidth;
+  return _finishTotal(result, target);
+}
+
 /// 返回 11 个普通列和最后一个备注列的默认宽度。
 /// 所有数据列宽度之和加选择列宽度后严格等于 [availableWidth]。
 List<double> computeTaskColumnWidths(double availableWidth) {
@@ -84,7 +99,10 @@ List<double> computeTaskColumnWidths(double availableWidth) {
         availableForGrowth * range / preferredGrowth;
   });
   final used = nonRemark.fold<double>(0, (sum, width) => sum + width);
-  return _finishTotal([...nonRemark, usable - used], usable);
+  return _lockAttachmentColumn(
+    _finishTotal([...nonRemark, usable - used], usable),
+    usable,
+  );
 }
 
 /// 把已保存或当前列宽适配到新的窗口宽度。
@@ -123,7 +141,7 @@ List<double> fitTaskColumnWidths(
     (index) => taskAllMinColumnWidths[index] +
         availableExtra * extras[index] / extraTotal,
   );
-  return _finishTotal(fitted, usable);
+  return _lockAttachmentColumn(_finishTotal(fitted, usable), usable);
 }
 
 /// 拖动第 [dividerIndex] 个分隔线时，只调整该分隔线左侧栏目。
@@ -138,7 +156,11 @@ List<double> resizeTaskColumnWidths(
 ) {
   final fitted = fitTaskColumnWidths(availableWidth, currentWidths);
   const remarkIndex = taskColumnCount - 1;
-  if (dividerIndex < 0 || dividerIndex >= remarkIndex) return fitted;
+  if (dividerIndex < 0 ||
+      dividerIndex >= remarkIndex ||
+      dividerIndex == taskAttachmentColumnIndex) {
+    return fitted;
+  }
 
   final minimums = _minimumsForUsableWidth(_usableTaskWidth(availableWidth));
   final columnWidth = fitted[dividerIndex];
@@ -185,6 +207,9 @@ List<double> autoFitTaskColumnWidths(
   final usable = _usableTaskWidth(availableWidth);
   final minimums = _minimumsForUsableWidth(usable);
   final desired = List<double>.generate(taskColumnCount - 1, (index) {
+    if (index == taskAttachmentColumnIndex) {
+      return taskAttachmentColumnWidth;
+    }
     var width = _estimateTaskCellWidth(taskColumnHeaderLabels[index]);
     for (final row in rows) {
       if (index < row.length) {
