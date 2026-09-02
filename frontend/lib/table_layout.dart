@@ -137,7 +137,7 @@ List<double> resizeTaskColumnWidths(
   double availableWidth,
 ) {
   final fitted = fitTaskColumnWidths(availableWidth, currentWidths);
-  final remarkIndex = taskColumnCount - 1;
+  const remarkIndex = taskColumnCount - 1;
   if (dividerIndex < 0 || dividerIndex >= remarkIndex) return fitted;
 
   final minimums = _minimumsForUsableWidth(_usableTaskWidth(availableWidth));
