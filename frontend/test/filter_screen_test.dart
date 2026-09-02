@@ -21,6 +21,7 @@ void main() {
       expect(find.text(label), findsOneWidget);
     }
     expect(find.textContaining('逗号分隔'), findsNothing);
+    expect(find.text('期望剩余天数'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

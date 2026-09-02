@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../app_widgets.dart';
 import '../models.dart';
+import '../notification_search.dart';
+import '../search_field.dart';
+import '../snapshot_filter.dart';
 import '../table_layout.dart';
 import '../task_sort.dart';
+import 'filter_screen.dart';
 
 String snapshotSavedMessage(int usedCount) =>
     '历史快照已保存（最多保留 5 份）（当前已经使用$usedCount份）';
@@ -38,8 +42,11 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
     '备注',
   ];
 
+  final TextEditingController _searchController = TextEditingController();
   SnapshotDetail? _detail;
   Object? _error;
+  FilterReq _filter = const FilterReq();
+  List<Task> _filteredTasks = const [];
   TaskSortColumn _sortColumn = TaskSortColumn.meetingNo;
   bool _sortAscending = true;
 
@@ -48,6 +55,13 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
     super.initState();
     _detail = widget.initialDetail;
     if (_detail == null) _load();
+    else _applyFilters();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -58,20 +72,45 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
     try {
       final detail = await Api.getSnapshot(widget.snapshot.snapshotId);
       if (!mounted) return;
-      setState(() => _detail = detail);
+      setState(() {
+        _detail = detail;
+        _applyFilters();
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = error);
     }
   }
 
-  List<Task> get _tasks {
-    final tasks = _detail?.tasks ?? const <Task>[];
-    return sortTasks(
-      tasks,
-      column: _sortColumn,
-      ascending: _sortAscending,
+  List<Task> get _tasks => sortTasks(
+        _filteredTasks,
+        column: _sortColumn,
+        ascending: _sortAscending,
+      );
+
+  void _applyFilters() {
+    final source = _detail?.tasks ?? const <Task>[];
+    final query = _searchController.text;
+    final filtered = filterSnapshotTasks(source, _filter);
+    _filteredTasks = query.trim().isEmpty
+        ? filtered
+        : filtered
+            .where((task) => taskMatchesSearch(task, query))
+            .toList();
+  }
+
+  void _search(String _) => setState(_applyFilters);
+
+  Future<void> _openFilter() async {
+    final result = await showDialog<FilterReq>(
+      context: context,
+      builder: (_) => FilterScreen(initial: _filter),
     );
+    if (result == null || !mounted) return;
+    setState(() {
+      _filter = result;
+      _applyFilters();
+    });
   }
 
   void _sortByIndex(int index) {
@@ -182,39 +221,62 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
             : scheme.surface,
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
-      child: Row(
+      child: Stack(
+        fit: StackFit.passthrough,
         children: [
-          const SizedBox(
-            width: taskSelectionWidth,
-            child: Center(
-              child: Icon(Icons.lock_outline_rounded, size: 15),
-            ),
-          ),
-          for (var column = 0; column < values.length; column++)
-            Container(
-              width: widths[column],
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-              decoration: BoxDecoration(
-                border: Border(
-                  right: BorderSide(color: scheme.outlineVariant),
+          Row(
+            children: [
+              const SizedBox(
+                width: taskSelectionWidth,
+                child: Center(
+                  child: Icon(Icons.lock_outline_rounded, size: 15),
                 ),
               ),
-              child: Tooltip(
-                message: values[column],
-                child: column == 10
-                    ? task.hasAttachment
-                        ? const Align(
-                            alignment: Alignment.center,
-                            child: Icon(Icons.attach_file_rounded, size: 19),
-                          )
-                        : const SizedBox.shrink()
-                    : Text(
-                        values[column],
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-              ),
-            ),
+              for (var column = 0; column < values.length; column++)
+                Container(
+                  width: widths[column],
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 9,
+                  ),
+                  decoration: column == taskAttachmentColumnIndex
+                      ? null
+                      : BoxDecoration(
+                          border: Border(
+                            right: BorderSide(color: scheme.outlineVariant),
+                          ),
+                        ),
+                  child: Tooltip(
+                    message: values[column],
+                    child: column == taskAttachmentColumnIndex
+                        ? task.hasAttachment
+                            ? const Align(
+                                alignment: Alignment.center,
+                                child: Icon(
+                                  Icons.attach_file_rounded,
+                                  size: 19,
+                                ),
+                              )
+                            : const SizedBox.shrink()
+                        : Text(
+                            values[column],
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                  ),
+                ),
+            ],
+          ),
+          Positioned(
+            left: taskSelectionWidth +
+                widths
+                    .take(taskAttachmentColumnIndex + 1)
+                    .fold<double>(0, (sum, width) => sum + width),
+            top: 0,
+            bottom: 0,
+            width: 1,
+            child: ColoredBox(color: scheme.outlineVariant),
+          ),
         ],
       ),
     );
@@ -225,8 +287,18 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
     final detail = _detail;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('历史快照'),
+        title: AppBarSearchTitle(
+          title: '历史快照',
+          controller: _searchController,
+          hintText: '搜索快照任务（空格分词、引号短语、-排除）',
+          onChanged: _search,
+        ),
         actions: [
+          IconButton(
+            tooltip: '筛选快照数据',
+            onPressed: _openFilter,
+            icon: const Icon(Icons.filter_alt_rounded),
+          ),
           IconButton(
             tooltip: '重新加载',
             onPressed: _load,

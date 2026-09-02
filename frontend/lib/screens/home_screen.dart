@@ -431,6 +431,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _saveSnapshot() async {
+    var usedSnapshotCount = 0;
+    try {
+      usedSnapshotCount = (await Api.listSnapshots()).length;
+    } catch (_) {
+      // 快照列表读取失败时仍允许保存，成功后的返回值会给出准确数量。
+    }
+    if (!mounted) return;
     final controller = TextEditingController();
     final request = await showDialog<_SnapshotSaveRequest>(
       context: context,
@@ -442,15 +449,26 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         content: SizedBox(
           width: 460,
-          child: TextField(
-            controller: controller,
-            autofocus: true,
-            maxLines: 3,
-            minLines: 1,
-            decoration: const InputDecoration(
-              labelText: '备注（可选）',
-              hintText: '可填写本次快照的用途或说明，默认不填写',
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AppStatusPill(
+                icon: Icons.inventory_2_outlined,
+                label: '当前已经使用 $usedSnapshotCount 份快照',
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                maxLines: 3,
+                minLines: 1,
+                decoration: const InputDecoration(
+                  labelText: '备注（可选）',
+                  hintText: '可填写本次快照的用途或说明，默认不填写',
+                ),
+              ),
+            ],
           ),
         ),
         actions: [
@@ -731,12 +749,14 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Checkbox(
               value: _tasks.isNotEmpty &&
                   _tasks.every((task) => _selectedIds.contains(task.id)),
-              onChanged: (v) {
+              onChanged: (value) {
                 setState(() {
-                  if (v == true) {
+                  if (value == true) {
                     _selectedIds.clear();
                     _selectedIds.addAll(
-                      _tasks.where((task) => task.id != null).map((task) => task.id!),
+                      _tasks
+                          .where((task) => task.id != null)
+                          .map((task) => task.id!),
                     );
                   } else {
                     _selectedIds.clear();
@@ -745,8 +765,8 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
           ),
-          for (int i = 0; i < _columnLabels.length; i++)
-            _buildHeaderCell(widths[i], _columnLabels[i], i),
+          for (var index = 0; index < _columnLabels.length; index++)
+            _buildHeaderCell(widths[index], _columnLabels[index], index),
         ],
       ),
     );
@@ -824,63 +844,85 @@ class _HomeScreenState extends State<HomeScreen> {
         color: rowColor,
         border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
       ),
-      child: Row(
+      child: Stack(
+        fit: StackFit.passthrough,
         children: [
-          SizedBox(
-            width: taskSelectionWidth,
-            child: Checkbox(
-              value: isSelected,
-              onChanged: (v) {
-                setState(() {
-                  if (v == true) {
-                    if (t.id != null) _selectedIds.add(t.id!);
-                  } else {
-                    _selectedIds.remove(t.id);
-                  }
-                });
-              },
-            ),
-          ),
-          for (int i = 0; i < cellTexts.length; i++)
-            Container(
-              width: widths[i],
-              decoration: BoxDecoration(
-                border: Border(
-                  right: BorderSide(color: Colors.grey.shade200),
+          Row(
+            children: [
+              SizedBox(
+                width: taskSelectionWidth,
+                child: Checkbox(
+                  value: isSelected,
+                  onChanged: (value) {
+                    setState(() {
+                      if (value == true) {
+                        if (t.id != null) _selectedIds.add(t.id!);
+                      } else {
+                        _selectedIds.remove(t.id);
+                      }
+                    });
+                  },
                 ),
               ),
-              child: GestureDetector(
-                onTap: () => _viewTask(t),
-                onDoubleTap: () => i == 8 || i == 9
-                    ? _openDelayScreen(t)
-                    : _editTask(t),
-                onLongPress: () => _viewTask(t),
-                child: Tooltip(
-                  message: cellTexts[i],
-                  waitDuration: const Duration(milliseconds: 500),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    child: i == 10
-                        ? t.hasAttachment
-                            ? const Align(
-                                alignment: Alignment.center,
-                                child: Icon(Icons.attach_file_rounded, size: 19),
-                              )
-                            : const SizedBox.shrink()
-                        : Text(
-                            cellTexts[i],
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+              for (var column = 0; column < cellTexts.length; column++)
+                Container(
+                  width: widths[column],
+                  decoration: column == taskAttachmentColumnIndex
+                      ? null
+                      : BoxDecoration(
+                          border: Border(
+                            right: BorderSide(color: Colors.grey.shade200),
                           ),
+                        ),
+                  child: GestureDetector(
+                    onTap: () => _viewTask(t),
+                    onDoubleTap: () => column == 8 || column == 9
+                        ? _openDelayScreen(t)
+                        : _editTask(t),
+                    onLongPress: () => _viewTask(t),
+                    child: Tooltip(
+                      message: cellTexts[column],
+                      waitDuration: const Duration(milliseconds: 500),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
+                        child: column == taskAttachmentColumnIndex
+                            ? t.hasAttachment
+                                ? const Align(
+                                    alignment: Alignment.center,
+                                    child: Icon(
+                                      Icons.attach_file_rounded,
+                                      size: 19,
+                                    ),
+                                  )
+                                : const SizedBox.shrink()
+                            : Text(
+                                cellTexts[column],
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
+            ],
+          ),
+          Positioned(
+            left: taskSelectionWidth +
+                widths
+                    .take(taskAttachmentColumnIndex + 1)
+                    .fold<double>(0, (sum, width) => sum + width),
+            top: 0,
+            bottom: 0,
+            width: 1,
+            child: ColoredBox(color: scheme.outlineVariant),
+          ),
         ],
       ),
     );
   }
-
 
   Widget _buildActionBar() {
     return LayoutBuilder(

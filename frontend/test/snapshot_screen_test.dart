@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hyrwbz_frontend/models.dart';
 import 'package:hyrwbz_frontend/screens/snapshot_screen.dart';
+import 'package:hyrwbz_frontend/search_field.dart';
 
 void main() {
   test('snapshot save message ends with current usage', () {
@@ -43,6 +44,8 @@ void main() {
     );
 
     expect(find.text('历史快照'), findsOneWidget);
+    expect(find.byType(AppSearchField), findsOneWidget);
+    expect(find.byIcon(Icons.filter_alt_rounded), findsOneWidget);
     expect(find.text('只读任务'), findsOneWidget);
     expect(find.text('检查前'), findsOneWidget);
     expect(find.text('只读'), findsOneWidget);

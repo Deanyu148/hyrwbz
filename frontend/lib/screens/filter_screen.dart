@@ -19,7 +19,6 @@ class _FilterScreenState extends State<FilterScreen> {
   late final TextEditingController _owner;
   late final TextEditingController _delayIndex;
   late int _attachmentMode;
-  late int _expectedRemainingDays;
   // 保存 DateRangeField 的当前值
   String? _requiredFrom, _requiredTo;
   String? _actualFrom, _actualTo;
@@ -38,7 +37,6 @@ class _FilterScreenState extends State<FilterScreen> {
         : widget.initial.hasAttachment!
             ? 1
             : 2;
-    _expectedRemainingDays = widget.initial.expectedRemainingDays ?? 0;
     _requiredFrom = widget.initial.requiredDateFrom;
     _requiredTo = widget.initial.requiredDateTo;
     _actualFrom = widget.initial.actualDateFrom;
@@ -115,31 +113,6 @@ class _FilterScreenState extends State<FilterScreen> {
                 ],
               ),
               const Divider(height: 24),
-              Row(
-                children: [
-                  const Expanded(child: Text('期望剩余天数')),
-                  SizedBox(
-                    width: 180,
-                    child: DropdownButtonFormField<int>(
-                      initialValue: _expectedRemainingDays,
-                      decoration: const InputDecoration(
-                        labelText: '时间范围',
-                        isDense: true,
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 0, child: Text('全部')),
-                        DropdownMenuItem(value: 180, child: Text('半年内')),
-                        DropdownMenuItem(value: 30, child: Text('一月内')),
-                        DropdownMenuItem(value: 3, child: Text('三天内')),
-                      ],
-                      onChanged: (value) {
-                        setState(() => _expectedRemainingDays = value ?? 0);
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const Divider(height: 24),
               DateRangeField(
                 initialFrom: _requiredFrom,
                 initialTo: _requiredTo,
@@ -196,9 +169,8 @@ class _FilterScreenState extends State<FilterScreen> {
               delayDateFrom: _delayFrom,
               delayDateTo: _delayTo,
               delayIndex: di,
-              expectedRemainingDays: _expectedRemainingDays == 0
-                  ? null
-                  : _expectedRemainingDays,
+              // 该筛选项已从界面移除，但保留已有状态，避免打开后确认时丢失旧条件。
+              expectedRemainingDays: widget.initial.expectedRemainingDays,
               hasAttachment: _attachmentMode == 0
                   ? null
                   : _attachmentMode == 1,
