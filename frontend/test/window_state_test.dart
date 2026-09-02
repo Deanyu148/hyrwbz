@@ -20,7 +20,7 @@ void main() {
       maximized: false,
     );
     final bounds = WindowStateStore.correctedBounds(saved, const [display], display);
-    expect(bounds.left, closeTo(385, 0.001));
+    expect(bounds.left, closeTo(360, 0.001));
     expect(bounds.top, closeTo(170, 0.001));
   });
 
@@ -33,7 +33,7 @@ void main() {
       maximized: false,
     );
     final bounds = WindowStateStore.correctedBounds(saved, const [display], display);
-    expect(bounds.width, 1150);
+    expect(bounds.width, 1200);
     expect(bounds.height, 600);
   });
 

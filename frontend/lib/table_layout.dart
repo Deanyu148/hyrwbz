@@ -1,20 +1,20 @@
 const double taskSelectionWidth = 44.0;
 const double taskRemarkMinWidth = 100.0;
-const double taskAttachmentColumnWidth = 72.0;
+const double taskAttachmentColumnWidth = 79.0;
 const int taskAttachmentColumnIndex = 10;
 
 // 最小宽度按表头文字和右侧排序图标预留，保证正常最小窗口下表头完整显示。
 const List<double> taskMinColumnWidths = [
   64.0,
   110.0,
-  86.0,
-  88.0,
-  88.0,
-  76.0,
-  112.0,
-  112.0,
-  88.0,
-  88.0,
+  93.0,
+  95.0,
+  95.0,
+  83.0,
+  119.0,
+  119.0,
+  95.0,
+  95.0,
   taskAttachmentColumnWidth,
 ];
 const List<double> taskPreferredColumnWidths = [
