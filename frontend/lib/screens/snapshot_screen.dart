@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../app_widgets.dart';
 import '../models.dart';
-import '../notification_search.dart';
+import '../task_search.dart';
 import '../search_field.dart';
 import '../snapshot_filter.dart';
 import '../table_layout.dart';
@@ -54,8 +54,11 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
   void initState() {
     super.initState();
     _detail = widget.initialDetail;
-    if (_detail == null) _load();
-    else _applyFilters();
+    if (_detail == null) {
+      _load();
+    } else {
+      _applyFilters();
+    }
   }
 
   @override
