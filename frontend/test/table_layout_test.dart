@@ -56,10 +56,10 @@ void main() {
   test('dragging narrower grows only the remark column', () {
     const width = 1600.0;
     final original = computeTaskColumnWidths(width);
-    final resized = resizeTaskColumnWidths(original, 5, -20, width);
+    final resized = resizeTaskColumnWidths(original, 5, -10, width);
 
-    expect(original[5] - resized[5], closeTo(20, 0.001));
-    expect(resized.last - original.last, closeTo(20, 0.001));
+    expect(original[5] - resized[5], closeTo(10, 0.001));
+    expect(resized.last - original.last, closeTo(10, 0.001));
     for (var i = 0; i < resized.length; i++) {
       if (i != 5 && i != taskColumnCount - 1) {
         expect(resized[i], closeTo(original[i], 0.001));

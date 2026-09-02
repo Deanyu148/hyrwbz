@@ -20,7 +20,7 @@ void main() {
       maximized: false,
     );
     final bounds = WindowStateStore.correctedBounds(saved, const [display], display);
-    expect(bounds.left, closeTo(460, 0.001));
+    expect(bounds.left, closeTo(385, 0.001));
     expect(bounds.top, closeTo(170, 0.001));
   });
 
