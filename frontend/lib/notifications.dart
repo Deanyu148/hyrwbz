@@ -93,19 +93,18 @@ class CompactNotificationPanel extends StatelessWidget {
   static const double bodyFontSize = 14;
   static const double bodyLineHeight = 1.4;
   static const double _bodyVerticalPadding = bodyFontSize * bodyLineHeight / 2;
-  // 只放大外层面板，标题栏和底部提示保持原有高度。
+  // 外层面板按通知数量动态调整，标题栏保持原有高度。
   static const double _headerHeight = 36;
-  static const double _footerHeight = 24;
   static const double _dividerHeight = 1;
-  static const int maxPreviewItems = 2;
+  static const double maxPanelHeight = 166 * panelScale;
+  static const double _minimumContentHeight = 89 * panelScale;
 
   static double heightForItemCount(int itemCount) {
     if (itemCount <= 0) return 82 * panelScale;
-    final visibleCount = itemCount > maxPreviewItems
-        ? maxPreviewItems
-        : itemCount;
-    return (37 + visibleCount * 52 + (itemCount > visibleCount ? 25 : 0)) *
-        panelScale;
+    final estimatedContentHeight = (37 + itemCount * 52) * panelScale;
+    return estimatedContentHeight
+        .clamp(_minimumContentHeight, maxPanelHeight)
+        .toDouble();
   }
 
   final List<NotificationItem> notifications;
@@ -121,8 +120,6 @@ class CompactNotificationPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visible = notifications.take(maxPreviewItems).toList();
-    final hiddenCount = notifications.length - visible.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -175,75 +172,61 @@ class CompactNotificationPanel extends StatelessWidget {
           )
         else
           Expanded(
-            child: ListView.separated(
-              padding: EdgeInsets.zero,
-              itemCount: visible.length,
-              separatorBuilder: (_, __) =>
-                  const Divider(height: _dividerHeight),
-              itemBuilder: (context, index) {
-                final item = visible[index];
-                return Tooltip(
-                  message: '点击查看详情',
-                  child: InkWell(
-                    key: ValueKey('compact-notification-${item.id}'),
-                    onTap: () => onTap(item),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: _bodyVerticalPadding,
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          SizedBox(
-                            width: 10,
-                            child: item.isRead
-                                ? null
-                                : Center(
-                                    child: Container(
-                                      width: 6,
-                                      height: 6,
-                                      decoration: const BoxDecoration(
-                                        color: Colors.red,
-                                        shape: BoxShape.circle,
+            child: Scrollbar(
+              child: ListView.separated(
+                padding: EdgeInsets.zero,
+                itemCount: notifications.length,
+                separatorBuilder: (_, __) =>
+                    const Divider(height: _dividerHeight),
+                itemBuilder: (context, index) {
+                  final item = notifications[index];
+                  return Tooltip(
+                    message: '点击查看详情',
+                    child: InkWell(
+                      key: ValueKey('compact-notification-${item.id}'),
+                      onTap: () => onTap(item),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: _bodyVerticalPadding,
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            SizedBox(
+                              width: 10,
+                              child: item.isRead
+                                  ? null
+                                  : Center(
+                                      child: Container(
+                                        width: 6,
+                                        height: 6,
+                                        decoration: const BoxDecoration(
+                                          color: Colors.red,
+                                          shape: BoxShape.circle,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                          ),
-                          Expanded(
-                            child: Text(
-                              item.message,
-                              textAlign: TextAlign.left,
-                              style: const TextStyle(
-                                fontSize: bodyFontSize,
-                                height: bodyLineHeight,
+                            ),
+                            Expanded(
+                              child: Text(
+                                item.message,
+                                textAlign: TextAlign.left,
+                                style: const TextStyle(
+                                  fontSize: bodyFontSize,
+                                  height: bodyLineHeight,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                );
-              },
-            ),
-          ),
-        if (hiddenCount > 0) ...[
-          const Divider(height: _dividerHeight),
-          SizedBox(
-            height: _footerHeight,
-            child: Center(
-              child: Text(
-                '还有 $hiddenCount 条',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontSize: 13,
-                ),
+                  );
+                },
               ),
             ),
           ),
-        ],
       ],
     );
   }

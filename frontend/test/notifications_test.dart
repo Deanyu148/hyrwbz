@@ -16,15 +16,17 @@ NotificationItem notification(int id, {String? message}) => NotificationItem(
     );
 
 void main() {
-  testWidgets('compact panel has strict size and previews only two items', (tester) async {
-    final notifications = List.generate(6, (index) => notification(index + 1));
+  testWidgets('compact panel fills available space with dynamic notifications', (tester) async {
+    final notifications = List.generate(20, (index) => notification(index + 1));
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: Center(
             child: SizedBox(
               width: CompactNotificationPanel.panelWidth,
-              height: CompactNotificationPanel.heightForItemCount(6),
+              height: CompactNotificationPanel.heightForItemCount(
+                notifications.length,
+              ),
               child: CompactNotificationPanel(
                 notifications: notifications,
                 onMarkAllRead: () async {},
@@ -37,6 +39,7 @@ void main() {
     );
 
     expect(CompactNotificationPanel.panelWidth, 390);
+    expect(CompactNotificationPanel.maxPanelHeight, 498);
     expect(
       tester.getSize(find.byType(CompactNotificationPanel)),
       const Size(390, 498),
@@ -44,12 +47,20 @@ void main() {
     expect(CompactNotificationPanel.heightForItemCount(0), 246);
     expect(CompactNotificationPanel.heightForItemCount(1), 267);
     expect(CompactNotificationPanel.heightForItemCount(2), 423);
-    expect(CompactNotificationPanel.heightForItemCount(6), 498);
+    expect(CompactNotificationPanel.heightForItemCount(3), 498);
+    expect(CompactNotificationPanel.heightForItemCount(20), 498);
     expect(find.text('通知1'), findsOneWidget);
-    expect(find.text('通知2'), findsOneWidget);
-    expect(find.text('通知3'), findsNothing);
-    expect(find.text('还有 4 条'), findsOneWidget);
+    expect(find.text('通知3'), findsOneWidget);
+    expect(find.textContaining('还有'), findsNothing);
+    expect(find.byType(Scrollbar), findsOneWidget);
     expect(find.byIcon(Icons.done_all_rounded), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('通知20'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('通知20'), findsOneWidget);
   });
 
   testWidgets('full notification list is not limited by compact preview rules', (tester) async {
