@@ -1,6 +1,43 @@
 import 'package:flutter/material.dart';
 
+class AppBarSearchTitle extends StatelessWidget {
+  final String title;
+  final TextEditingController controller;
+  final String hintText;
+  final ValueChanged<String> onChanged;
+
+  const AppBarSearchTitle({
+    super.key,
+    required this.title,
+    required this.controller,
+    required this.hintText,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: AppSearchField.fieldHeight,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(width: 18),
+          Expanded(
+            child: AppSearchField(
+              controller: controller,
+              hintText: hintText,
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class AppSearchField extends StatelessWidget {
+  static const double fieldHeight = 38;
   final TextEditingController controller;
   final String hintText;
   final ValueChanged<String> onChanged;
@@ -15,7 +52,7 @@ class AppSearchField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 38,
+      height: fieldHeight,
       child: TextField(
         controller: controller,
         onChanged: onChanged,

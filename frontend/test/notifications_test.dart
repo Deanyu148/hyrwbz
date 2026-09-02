@@ -16,18 +16,17 @@ NotificationItem notification(int id) => NotificationItem(
     );
 
 void main() {
-  testWidgets('compact notification panel previews at most four items', (tester) async {
+  testWidgets('compact panel has strict size and previews only two items', (tester) async {
     final notifications = List.generate(6, (index) => notification(index + 1));
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: Center(
             child: SizedBox(
-              width: 130,
-              height: 297,
-              child: NotificationListView(
+              width: CompactNotificationPanel.panelWidth,
+              height: 166,
+              child: CompactNotificationPanel(
                 notifications: notifications,
-                compact: true,
                 onMarkAllRead: () async {},
                 onTap: (_) async {},
               ),
@@ -37,10 +36,37 @@ void main() {
       ),
     );
 
+    expect(CompactNotificationPanel.panelWidth, 130);
+    expect(
+      tester.getSize(find.byType(CompactNotificationPanel)),
+      const Size(130, 166),
+    );
+    expect(CompactNotificationPanel.heightForItemCount(0), 82);
+    expect(CompactNotificationPanel.heightForItemCount(1), 89);
+    expect(CompactNotificationPanel.heightForItemCount(2), 141);
+    expect(CompactNotificationPanel.heightForItemCount(6), 166);
     expect(find.text('通知1'), findsOneWidget);
-    expect(find.text('通知4'), findsOneWidget);
-    expect(find.text('通知5'), findsNothing);
-    expect(find.text('还有 2 条，点击查看全部'), findsOneWidget);
+    expect(find.text('通知2'), findsOneWidget);
+    expect(find.text('通知3'), findsNothing);
+    expect(find.text('还有 4 条'), findsOneWidget);
     expect(find.byIcon(Icons.done_all), findsOneWidget);
+  });
+
+  testWidgets('full notification list is not limited by compact preview rules', (tester) async {
+    final notifications = List.generate(6, (index) => notification(index + 1));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: NotificationListView(
+            notifications: notifications,
+            onTap: (_) async {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('通知1'), findsOneWidget);
+    expect(find.text('通知6'), findsOneWidget);
+    expect(find.textContaining('还有'), findsNothing);
   });
 }

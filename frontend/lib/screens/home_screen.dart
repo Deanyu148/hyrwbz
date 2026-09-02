@@ -692,18 +692,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            const Text('会议任务管理跟踪系统'),
-            const SizedBox(width: 18),
-            Expanded(
-              child: AppSearchField(
-                controller: _searchController,
-                hintText: '搜索任务（空格分词、引号短语、-排除）',
-                onChanged: _searchTasks,
-              ),
-            ),
-          ],
+        title: AppBarSearchTitle(
+          title: '会议任务管理跟踪系统',
+          controller: _searchController,
+          hintText: '搜索任务（空格分词、引号短语、-排除）',
+          onChanged: _searchTasks,
         ),
         actions: [
           NotificationButton(

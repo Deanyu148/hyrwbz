@@ -11,122 +11,188 @@ const _notificationRefreshInterval = Duration(seconds: 30);
 
 class NotificationListView extends StatelessWidget {
   final List<NotificationItem> notifications;
-  final bool compact;
-  final Future<void> Function()? onMarkAllRead;
   final Future<void> Function(NotificationItem item) onTap;
-  final bool showMarkAllRead;
 
   const NotificationListView({
     super.key,
     required this.notifications,
-    this.onMarkAllRead,
     required this.onTap,
-    this.compact = false,
-    this.showMarkAllRead = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    final visibleNotifications = compact && notifications.length > 4
-        ? notifications.take(4).toList()
-        : notifications;
-    final hiddenCount = notifications.length - visibleNotifications.length;
+    if (notifications.isEmpty) {
+      return const Center(child: Text('暂无通知'));
+    }
+    return ListView.separated(
+      padding: EdgeInsets.zero,
+      itemCount: notifications.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final item = notifications[index];
+        return Tooltip(
+          message: '点击查看详情',
+          child: InkWell(
+            onTap: () => onTap(item),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    child: item.isRead
+                        ? null
+                        : Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Colors.red,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                  ),
+                  Expanded(child: Text(item.message)),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 仅供鼠标悬停预览使用的紧凑面板，与完整通知界面完全独立。
+class CompactNotificationPanel extends StatelessWidget {
+  static const double panelWidth = 130;
+  static const int maxPreviewItems = 2;
+
+  static double heightForItemCount(int itemCount) {
+    if (itemCount <= 0) return 82;
+    final visibleCount = itemCount > maxPreviewItems
+        ? maxPreviewItems
+        : itemCount;
+    return 37 + visibleCount * 52 + (itemCount > visibleCount ? 25 : 0);
+  }
+
+  final List<NotificationItem> notifications;
+  final Future<void> Function() onMarkAllRead;
+  final Future<void> Function(NotificationItem item) onTap;
+
+  const CompactNotificationPanel({
+    super.key,
+    required this.notifications,
+    required this.onMarkAllRead,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = notifications.take(maxPreviewItems).toList();
+    final hiddenCount = notifications.length - visible.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
-          child: Row(
-            children: [
-              Text(
-                '通知${notifications.isEmpty ? '' : '（${notifications.length}）'}',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              if (showMarkAllRead)
+        SizedBox(
+          height: 36,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 8, right: 2),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    '通知',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
                 IconButton(
                   tooltip: '全部已读',
                   visualDensity: VisualDensity.compact,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints.tightFor(
-                    width: 32,
-                    height: 32,
+                    width: 30,
+                    height: 30,
                   ),
                   onPressed: notifications.any((item) => !item.isRead)
                       ? onMarkAllRead
                       : null,
-                  icon: const Icon(Icons.done_all, size: 18),
+                  icon: const Icon(Icons.done_all, size: 17),
                 ),
-            ],
+              ],
+            ),
           ),
         ),
         const Divider(height: 1),
-        Expanded(
-          child: notifications.isEmpty
-              ? const Center(child: Text('暂无需要提醒的任务'))
-              : ListView.builder(
-                  padding: EdgeInsets.zero,
-                  physics: compact
-                      ? const NeverScrollableScrollPhysics()
-                      : null,
-                  itemCount: visibleNotifications.length,
-                  itemBuilder: (context, index) {
-                    final item = visibleNotifications[index];
-                    return Tooltip(
-                      message: '点击查看详情',
-                      child: InkWell(
-                        onTap: () => onTap(item),
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: compact ? 7 : 10,
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                width: 14,
-                                child: item.isRead
-                                    ? null
-                                    : Padding(
-                                        padding: const EdgeInsets.only(top: 5),
-                                        child: Container(
-                                          width: 7,
-                                          height: 7,
-                                          decoration: const BoxDecoration(
-                                            color: Colors.red,
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                      ),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  item.message,
-                                  maxLines: compact ? 2 : null,
-                                  overflow: compact
-                                      ? TextOverflow.ellipsis
-                                      : null,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        if (compact && hiddenCount > 0) ...[
-          const Divider(height: 1),
-          SizedBox(
-            height: 30,
+        if (notifications.isEmpty)
+          const Expanded(
             child: Center(
               child: Text(
-                '还有 $hiddenCount 条，点击查看全部',
-                maxLines: 2,
+                '暂无通知',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          )
+        else
+          for (final item in visible)
+            SizedBox(
+              height: 52,
+              child: Tooltip(
+                message: '点击查看详情',
+                child: InkWell(
+                  onTap: () => onTap(item),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 5,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 10,
+                          child: item.isRead
+                              ? null
+                              : Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: const BoxDecoration(
+                                      color: Colors.red,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            item.message,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        if (hiddenCount > 0) ...[
+          const Divider(height: 1),
+          SizedBox(
+            height: 24,
+            child: Center(
+              child: Text(
+                '还有 $hiddenCount 条',
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -227,18 +293,11 @@ class _NotificationScreenState extends State<NotificationScreen> {
     final hasUnread = _allNotifications.any((item) => !item.isRead);
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            const Text('通知'),
-            const SizedBox(width: 18),
-            Expanded(
-              child: AppSearchField(
-                controller: _searchController,
-                hintText: '搜索通知（空格分词、引号短语、-排除）',
-                onChanged: _searchNotifications,
-              ),
-            ),
-          ],
+        title: AppBarSearchTitle(
+          title: '通知',
+          controller: _searchController,
+          hintText: '搜索通知（空格分词、引号短语、-排除）',
+          onChanged: _searchNotifications,
         ),
         actions: [
           TextButton.icon(
@@ -261,9 +320,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
           ? const Center(child: CircularProgressIndicator())
           : NotificationListView(
               notifications: _notifications,
-              onMarkAllRead: _markAllRead,
               onTap: _open,
-              showMarkAllRead: false,
             ),
     );
   }
@@ -374,18 +431,11 @@ class _NotificationHistoryScreenState extends State<NotificationHistoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            const Text('历史通知'),
-            const SizedBox(width: 18),
-            Expanded(
-              child: AppSearchField(
-                controller: _searchController,
-                hintText: '搜索历史通知',
-                onChanged: _search,
-              ),
-            ),
-          ],
+        title: AppBarSearchTitle(
+          title: '历史通知',
+          controller: _searchController,
+          hintText: '搜索历史通知',
+          onChanged: _search,
         ),
         actions: [
           IconButton(
@@ -464,7 +514,6 @@ class _NotificationHistoryScreenState extends State<NotificationHistoryScreen> {
                 : NotificationListView(
                     notifications: _notifications,
                     onTap: _open,
-                    showMarkAllRead: false,
                   ),
           ),
         ],
@@ -521,49 +570,51 @@ class _NotificationButtonState extends State<NotificationButton> {
     } catch (_) {}
   }
 
-  double get _compactPanelHeight {
-    if (_notifications.isEmpty) return 118;
-    final visibleCount = _notifications.length > 4 ? 4 : _notifications.length;
-    return 51 + visibleCount * 54 + (_notifications.length > 4 ? 30 : 0);
-  }
+  double get _compactPanelHeight =>
+      CompactNotificationPanel.heightForItemCount(_notifications.length);
 
   void _showPanel() {
     _hideTimer?.cancel();
     if (_entry != null) return;
     _entry = OverlayEntry(
-      builder: (context) => CompositedTransformFollower(
-        link: _layerLink,
-        showWhenUnlinked: false,
-        targetAnchor: Alignment.bottomRight,
-        followerAnchor: Alignment.topRight,
-        offset: const Offset(0, 8),
-        child: MouseRegion(
-          onEnter: (_) => _hideTimer?.cancel(),
-          onExit: (_) => _scheduleRemovePanel(),
-          child: Material(
-            elevation: 8,
-            borderRadius: BorderRadius.circular(8),
-            clipBehavior: Clip.antiAlias,
-            child: SizedBox(
-              width: 130,
-              height: _compactPanelHeight,
-              child: NotificationListView(
-                notifications: _notifications,
-                compact: true,
-                onMarkAllRead: () async {
-                  await Api.markAllNotificationsRead();
-                  await _load();
-                },
-                onTap: (item) async {
-                  if (!item.isRead) await Api.markNotificationRead(item.id);
-                  _removePanel();
-                  await widget.onOpenTask(item.taskId);
-                  await _load();
-                },
+      builder: (context) => Stack(
+        children: [
+          Positioned(
+            width: CompactNotificationPanel.panelWidth,
+            height: _compactPanelHeight,
+            child: CompositedTransformFollower(
+              link: _layerLink,
+              showWhenUnlinked: false,
+              targetAnchor: Alignment.bottomRight,
+              followerAnchor: Alignment.topRight,
+              offset: const Offset(0, 8),
+              child: MouseRegion(
+                onEnter: (_) => _hideTimer?.cancel(),
+                onExit: (_) => _scheduleRemovePanel(),
+                child: Material(
+                  elevation: 8,
+                  borderRadius: BorderRadius.circular(8),
+                  clipBehavior: Clip.antiAlias,
+                  child: CompactNotificationPanel(
+                    notifications: _notifications,
+                    onMarkAllRead: () async {
+                      await Api.markAllNotificationsRead();
+                      await _load();
+                    },
+                    onTap: (item) async {
+                      if (!item.isRead) {
+                        await Api.markNotificationRead(item.id);
+                      }
+                      _removePanel();
+                      await widget.onOpenTask(item.taskId);
+                      await _load();
+                    },
+                  ),
+                ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
     Overlay.of(context).insert(_entry!);
