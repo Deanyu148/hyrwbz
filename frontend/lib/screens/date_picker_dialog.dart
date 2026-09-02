@@ -179,28 +179,37 @@ class _S extends State<DatePickerDialogWidget> {
     );
   }
 
-  DateTime get _initialCalendarDate {
-    final candidate = _picked ?? DateTime.now();
-    if (candidate.isBefore(_firstDate)) return _firstDate;
-    if (candidate.isAfter(_lastDate)) return _lastDate;
-    return candidate;
+  void _selectYear(DateTime date) {
+    setState(() {
+      // 年份窗口只负责切换按月日历当前显示的年份，不直接修改最终日期。
+      _displayedMonth = DateTime(date.year, _displayedMonth.month);
+      _yearDateMode = false;
+    });
   }
 
   Widget _buildYearDatePicker() {
     return SizedBox(
       key: const ValueKey('year-date-picker'),
       height: 360,
-      child: CalendarDatePicker(
-        initialDate: _initialCalendarDate,
-        firstDate: _firstDate,
-        lastDate: _lastDate,
-        initialCalendarMode: DatePickerMode.year,
-        onDateChanged: (date) {
-          Navigator.pop(
-            context,
-            DateFormat('yyyy/MM/dd').format(date),
-          );
-        },
+      child: Column(
+        children: [
+          Text(
+            '选择年份后返回按月日历，再选择最终日期',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: YearPicker(
+              firstDate: _firstDate,
+              lastDate: _lastDate,
+              selectedDate: _displayedMonth,
+              currentDate: DateTime.now(),
+              onChanged: _selectYear,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -250,7 +259,14 @@ class _S extends State<DatePickerDialogWidget> {
           onPressed: () => Navigator.pop(context, null),
           child: const Text('取消'),
         ),
-        if (!_yearDateMode)
+        if (_yearDateMode)
+          TextButton.icon(
+            key: const ValueKey('return-to-month-picker'),
+            onPressed: () => setState(() => _yearDateMode = false),
+            icon: const Icon(Icons.calendar_month),
+            label: const Text('返回按月选择'),
+          )
+        else
           FilledButton(
             onPressed: () {
               final date = _parseDate(_ctrl.text);
