@@ -1,17 +1,18 @@
 name: Build Windows
 
 on:
+  # 只有创建版本 tag 或发布 Release 时自动构建，普通 main 推送不再触发打包。
   push:
-    branches: [main]
-    paths-ignore:
-      - '.cnb.yml'
-      - '.cnb/**'
-      - '.github/workflows/**'
-      - 'README.md'
-      - 'readme.md'
-      - '.gitignore'
+    tags:
+      - 'v*.*.*'
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
+      version:
+        description: "设定版本号（支持 X.X.X 或 vX.X.X）"
+        required: true
+        type: string
       is_pre_release:
         description: "是否预发布"
         type: boolean
@@ -27,46 +28,45 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Compute version (auto-increment)
+      - name: Resolve version
         id: tag
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
           INPUT_IS_PRE_RELEASE: ${{ inputs.is_pre_release }}
+          RELEASE_IS_PRE_RELEASE: ${{ github.event.release.prerelease }}
         run: |
-          $pre = if ($env:INPUT_IS_PRE_RELEASE -eq "true") { "true" } else { "false" }
-          $newVer = "0.1.0"
-          try {
-            # 获取所有 release tag，按版本号数值排序取最大
-            $rels = gh release list --repo $env:GITHUB_REPOSITORY --limit 100 --json tagName | ConvertFrom-Json
-            $maxVer = $null
-            $maxMajor = 0; $maxMinor = 0; $maxPatch = -1
-            foreach ($rel in $rels) {
-              $t = $rel.tagName
-              if ($t -match '^v?(\d+)\.(\d+)\.(\d+)') {
-                $maj = [int]$matches[1]; $min = [int]$matches[2]; $pat = [int]$matches[3]
-                if ($maj -gt $maxMajor -or ($maj -eq $maxMajor -and $min -gt $maxMinor) -or ($maj -eq $maxMajor -and $min -eq $maxMinor -and $pat -gt $maxPatch)) {
-                  $maxMajor = $maj; $maxMinor = $min; $maxPatch = $pat
-                  $maxVer = "$maj.$min.$pat"
-                }
-              }
-            }
-            if ($maxVer) {
-              Write-Host "Max version found: $maxVer"
-              $patch = $maxPatch + 1
-              $major = $maxMajor; $minor = $maxMinor
-              if ($patch -gt 9) { $patch = 0; $minor += 1 }
-              if ($minor -gt 9) { $minor = 0; $major += 1 }
-              $newVer = "$major.$minor.$patch"
-            } else {
-              Write-Host "无历史版本，用默认 0.1.0"
-            }
-          } catch { Write-Host "无法读取 tag，用默认 0.1.0" }
-          $tag = "v$newVer"
-          Write-Host "New tag: $tag"
-          echo "APP_VERSION=$newVer" >> $env:GITHUB_ENV
-          echo "IS_PRE_RELEASE=$pre" >> $env:GITHUB_ENV
-          echo "TAG=$tag" >> $env:GITHUB_OUTPUT
+          # 版本来源只取当前 tag/Release，手动触发则取用户输入。
+          switch ($env:EVENT_NAME) {
+            'push' { $rawVersion = $env:REF_NAME }
+            'release' { $rawVersion = $env:RELEASE_TAG }
+            'workflow_dispatch' { $rawVersion = $env:INPUT_VERSION }
+            default { throw "不支持的触发事件: $env:EVENT_NAME" }
+          }
+
+          $rawVersion = ($rawVersion ?? '').Trim()
+          if ($rawVersion -notmatch '^v?([0-9]+)\.([0-9]+)\.([0-9]+)$') {
+            throw "版本号格式错误: '$rawVersion'，必须是 X.X.X 或 vX.X.X"
+          }
+          $version = "$($matches[1]).$($matches[2]).$($matches[3])"
+          $tag = "v$version"
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            $pre = if ($env:INPUT_IS_PRE_RELEASE -eq 'true') { 'true' } else { 'false' }
+          } elseif ($env:EVENT_NAME -eq 'release') {
+            $pre = if ($env:RELEASE_IS_PRE_RELEASE -eq 'true') { 'true' } else { 'false' }
+          } else {
+            $pre = 'false'
+          }
+
+          Write-Host "Version: $version"
+          Write-Host "Tag: $tag"
+          Write-Host "Pre-release: $pre"
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+          "IS_PRE_RELEASE=$pre" >> $env:GITHUB_ENV
+          "TAG=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -168,7 +168,7 @@ jobs:
           path: build/portable/*.zip
           if-no-files-found: error
 
-      - name: Create tag and release
+      - name: Create or update tag and release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.TAG }}
