@@ -479,9 +479,11 @@ Windows 本地完整构建建议安装：
 
 ```powershell
 Set-Location backend
-cargo test --all-targets
+cargo test --release --all-targets
 cargo build --release
 ```
+
+CI 和本地构建统一使用 release profile 运行测试并生成正式文件，避免先构建 debug 测试、再重新构建 release 依赖；测试和正式文件在同一个后端构建步骤完成。
 
 输出：
 
