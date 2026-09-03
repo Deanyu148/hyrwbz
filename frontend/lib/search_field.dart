@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class AppBarSearchTitle extends StatelessWidget {
   static const double searchVerticalOffset = 2;
@@ -100,6 +101,53 @@ class AppSearchField extends StatelessWidget {
                       },
                     ),
           suffixIconConstraints: const BoxConstraints(minWidth: 40),
+          border: border,
+          enabledBorder: border,
+          focusedBorder: border.copyWith(
+            borderSide: BorderSide(color: scheme.primary, width: 1.5),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 与主界面搜索栏共享填充色、圆角、边框和提示文字样式的普通输入框。
+/// 用于筛选弹窗，避免筛选字段使用另一套浮动标签视觉。
+class AppFilterField extends StatelessWidget {
+  final TextEditingController controller;
+  final String hintText;
+  final TextInputType keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
+
+  const AppFilterField({
+    super.key,
+    required this.controller,
+    required this.hintText,
+    this.keyboardType = TextInputType.text,
+    this.inputFormatters,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(20),
+      borderSide: BorderSide(color: scheme.outlineVariant),
+    );
+    return SizedBox(
+      height: AppSearchField.fieldHeight,
+      child: TextField(
+        controller: controller,
+        keyboardType: keyboardType,
+        inputFormatters: inputFormatters,
+        decoration: InputDecoration(
+          hintText: hintText,
+          hintStyle: TextStyle(color: scheme.onSurfaceVariant),
+          isDense: true,
+          filled: true,
+          fillColor: scheme.surfaceContainerLow,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           border: border,
           enabledBorder: border,
           focusedBorder: border.copyWith(

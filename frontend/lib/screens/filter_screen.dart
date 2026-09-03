@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../input_formatters.dart';
+import '../search_field.dart';
 import '../app_widgets.dart';
 import '../models.dart';
 import 'date_picker_dialog.dart';
@@ -192,21 +193,13 @@ class _FilterScreenState extends State<FilterScreen> {
   }) {
     return SizedBox(
       width: width,
-      child: TextField(
+      child: AppFilterField(
         controller: c,
+        hintText: label,
         keyboardType: isNum ? TextInputType.number : TextInputType.text,
         inputFormatters: normalizeCommas
             ? const [EnglishCommaTextInputFormatter()]
             : null,
-        decoration: InputDecoration(
-          label: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(label),
-          ),
-          isDense: true,
-          floatingLabelBehavior: FloatingLabelBehavior.always,
-        ),
       ),
     );
   }

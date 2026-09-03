@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hyrwbz_frontend/screens/filter_screen.dart';
+import 'package:hyrwbz_frontend/search_field.dart';
 
 void main() {
   testWidgets('filter inputs use complete labels without comma hint', (tester) async {
@@ -22,6 +23,7 @@ void main() {
     }
     expect(find.textContaining('逗号分隔'), findsNothing);
     expect(find.text('期望剩余天数'), findsNothing);
+    expect(find.byType(AppFilterField), findsNWidgets(5));
     expect(tester.takeException(), isNull);
   });
 }
