@@ -10,7 +10,7 @@ import '../task_sort.dart';
 import 'filter_screen.dart';
 
 String snapshotSavedMessage(int usedCount) =>
-    '历史快照已保存（最多保留 5 份）（当前已经使用$usedCount份）';
+    '历史快照已保存（最多保留 10 份）（当前已经使用$usedCount份）';
 
 class SnapshotScreen extends StatefulWidget {
   final SnapshotInfo snapshot;
@@ -377,8 +377,6 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
                                     _header(widths),
                                     Expanded(
                                       child: Scrollbar(
-                                        thumbVisibility: false,
-                                        interactive: true,
                                         child: ListView.builder(
                                           itemCount: tasks.length,
                                           itemBuilder: (context, index) =>

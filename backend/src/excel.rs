@@ -23,8 +23,9 @@ pub async fn export(db: &Db, filter: FilterReq, out_dir: Option<String>) -> Resu
 
     // 历史 snapshots
     let snaps = sqlx::query(
-        "SELECT snapshot_id, saved_at, payload FROM snapshots ORDER BY snapshot_id DESC LIMIT 5",
+        "SELECT snapshot_id, saved_at, payload FROM snapshots ORDER BY snapshot_id DESC LIMIT ?1",
     )
+    .bind(crate::import_export::SNAPSHOT_LIMIT)
     .fetch_all(db)
     .await?;
     let sorted: Vec<(String, String)> = snaps
@@ -37,7 +38,7 @@ pub async fn export(db: &Db, filter: FilterReq, out_dir: Option<String>) -> Resu
         })
         .collect();
 
-    // 仅保留 5 份，倒序：Sheet2 = 第一份历史（最早），即倒序后第一个
+    // 最多导出 10 份，倒序：Sheet2 = 第一份历史（最早），即倒序后第一个
     let mut sheets_names: Vec<String> = vec!["当前数据".to_string()];
     for (saved_at, payload) in &sorted {
         let snap_tasks: Vec<Task> = serde_json::from_str(payload).unwrap_or_default();

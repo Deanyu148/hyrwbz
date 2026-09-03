@@ -1,8 +1,10 @@
 name: Build Windows
 
 on:
-  # 只有创建版本 tag 或发布 Release 时自动构建，普通 main 推送不再触发打包。
+  # main 分支每次 push 都会构建并自动发布下一个版本；手动推送版本 tag 仍可构建指定版本。
   push:
+    branches:
+      - main
     tags:
       - 'v*.*.*'
   release:
@@ -10,8 +12,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "设定版本号（支持 X.X.X 或 vX.X.X）"
-        required: true
+        description: "设定版本号（留空则根据最新 tag 自动加 0.0.1）"
+        required: false
         type: string
       is_pre_release:
         description: "是否预发布"
@@ -21,12 +23,20 @@ on:
 permissions:
   contents: write
 
+# 自动版本号依赖最新 tag；串行执行可避免连续 push 计算出相同版本。
+concurrency:
+  group: build-windows-release
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # 自动推算版本时需要读取完整 tag 历史。
+          fetch-depth: 0
 
       - name: Resolve version
         id: tag
@@ -34,16 +44,77 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_IS_PRE_RELEASE: ${{ inputs.is_pre_release }}
           RELEASE_IS_PRE_RELEASE: ${{ github.event.release.prerelease }}
         run: |
-          # 版本来源只取当前 tag/Release，手动触发则取用户输入。
+          function Get-NextVersion {
+            $versions = @(
+              git tag --list 'v*.*.*' | ForEach-Object {
+                if ($_ -match '^v([0-9]+)\.([0-9]+)\.([0-9]+)$') {
+                  [pscustomobject]@{
+                    Major = [int]$matches[1]
+                    Minor = [int]$matches[2]
+                    Patch = [int]$matches[3]
+                  }
+                }
+              }
+            )
+            if ($LASTEXITCODE -ne 0) {
+              throw '读取 Git tag 失败'
+            }
+
+            if ($versions.Count -eq 0) {
+              return '0.0.1'
+            }
+
+            $latest = $versions |
+              Sort-Object -Property `
+                @{ Expression = { $_.Major }; Descending = $true }, `
+                @{ Expression = { $_.Minor }; Descending = $true }, `
+                @{ Expression = { $_.Patch }; Descending = $true } |
+              Select-Object -First 1
+
+            $major = $latest.Major
+            $minor = $latest.Minor
+            $patch = $latest.Patch + 1
+            if ($patch -ge 10) {
+              $patch = 0
+              $minor++
+            }
+            if ($minor -ge 10) {
+              $minor = 0
+              $major++
+            }
+            return "$major.$minor.$patch"
+          }
+
+          $inputVersion = ($env:INPUT_VERSION ?? '').Trim()
           switch ($env:EVENT_NAME) {
-            'push' { $rawVersion = $env:REF_NAME }
-            'release' { $rawVersion = $env:RELEASE_TAG }
-            'workflow_dispatch' { $rawVersion = $env:INPUT_VERSION }
+            'push' {
+              if ($env:REF_TYPE -eq 'tag') {
+                $rawVersion = $env:REF_NAME
+                $versionSource = 'push tag'
+              } else {
+                $rawVersion = Get-NextVersion
+                $versionSource = 'latest tag + 0.0.1'
+              }
+            }
+            'release' {
+              $rawVersion = $env:RELEASE_TAG
+              $versionSource = 'published release'
+            }
+            'workflow_dispatch' {
+              if ($inputVersion) {
+                $rawVersion = $inputVersion
+                $versionSource = 'manual input'
+              } else {
+                $rawVersion = Get-NextVersion
+                $versionSource = 'latest tag + 0.0.1'
+              }
+            }
             default { throw "不支持的触发事件: $env:EVENT_NAME" }
           }
 
@@ -61,6 +132,7 @@ jobs:
             $pre = 'false'
           }
 
+          Write-Host "Version source: $versionSource"
           Write-Host "Version: $version"
           Write-Host "Tag: $tag"
           Write-Host "Pre-release: $pre"
@@ -172,6 +244,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.TAG }}
+          target_commitish: ${{ github.sha }}
           name: HYRWBZ ${{ steps.tag.outputs.TAG }}
           body: ${{ steps.tag.outputs.TAG }}
           prerelease: ${{ env.IS_PRE_RELEASE == 'true' }}

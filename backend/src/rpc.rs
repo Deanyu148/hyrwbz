@@ -251,7 +251,7 @@ async fn dispatch_inner(
                 let param: ExportParam = decode(request.params)?;
                 json!({"path": import_export::export_csv(db, param.filter, param.out_dir).await.map_err(service::ServiceError::internal)?})
             }
-            "export.database" => json!({"path": import_export::export_db_file().await.map_err(service::ServiceError::internal)?}),
+            "export.database" => json!({"path": import_export::export_db_file(db).await.map_err(service::ServiceError::internal)?}),
             "export.all_files" => {
                 let param: ExportParam = decode(request.params)?;
                 json!({"path": import_export::export_all_files(db, param.out_dir).await.map_err(service::ServiceError::internal)?})

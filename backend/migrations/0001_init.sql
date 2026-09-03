@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS meta (
     value TEXT NOT NULL DEFAULT ''
 );
 
--- 历史快照表：最多保留 5 份
+-- 历史快照表：最多保留 10 份
 CREATE TABLE IF NOT EXISTS snapshots (
     snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
     saved_at    TEXT    NOT NULL DEFAULT (datetime('now')),

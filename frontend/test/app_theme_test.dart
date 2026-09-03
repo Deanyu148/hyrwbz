@@ -11,6 +11,19 @@ void main() {
     expect(theme.scaffoldBackgroundColor, AppTheme.canvasColor);
     expect(theme.appBarTheme.toolbarHeight, 64);
     expect(theme.inputDecorationTheme.filled, isTrue);
+    final scrollbar = theme.scrollbarTheme;
+    expect(scrollbar.interactive, isTrue);
+    expect(scrollbar.thumbVisibility?.resolve(<WidgetState>{}), isFalse);
+    expect(scrollbar.trackVisibility?.resolve(<WidgetState>{}), isFalse);
+    expect(
+      scrollbar.thickness?.resolve(<WidgetState>{}),
+      AppTheme.scrollbarThickness,
+    );
+    expect(
+      scrollbar.thickness?.resolve(<WidgetState>{WidgetState.hovered}),
+      AppTheme.scrollbarActiveThickness,
+    );
+    expect(scrollbar.radius, AppTheme.scrollbarRadius);
   });
 
   testWidgets('non-search input fields share the add/edit field geometry', (tester) async {

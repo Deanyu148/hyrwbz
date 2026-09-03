@@ -5,6 +5,9 @@ abstract final class AppTheme {
   static const Color seedColor = Color(0xFF3156C8);
   static const Color accentColor = Color(0xFF0E9384);
   static const Color canvasColor = Color(0xFFF4F6FB);
+  static const double scrollbarThickness = 6;
+  static const double scrollbarActiveThickness = 8;
+  static const Radius scrollbarRadius = Radius.circular(999);
 
   static ThemeData light() {
     final scheme = ColorScheme.fromSeed(
@@ -32,6 +35,35 @@ abstract final class AppTheme {
       borderSide: BorderSide(color: scheme.outlineVariant),
     );
     return base.copyWith(
+      scrollbarTheme: ScrollbarThemeData(
+        thumbVisibility: const WidgetStatePropertyAll(false),
+        trackVisibility: const WidgetStatePropertyAll(false),
+        interactive: true,
+        thickness: WidgetStateProperty.resolveWith<double>((states) {
+          if (states.contains(WidgetState.hovered) ||
+              states.contains(WidgetState.dragged)) {
+            return scrollbarActiveThickness;
+          }
+          return scrollbarThickness;
+        }),
+        thumbColor: WidgetStateProperty.resolveWith<Color>((states) {
+          if (states.contains(WidgetState.dragged)) {
+            return scheme.primary.withValues(alpha: 0.72);
+          }
+          if (states.contains(WidgetState.hovered)) {
+            return scheme.primary.withValues(alpha: 0.58);
+          }
+          return scheme.onSurfaceVariant.withValues(alpha: 0.42);
+        }),
+        trackColor: WidgetStatePropertyAll(
+          scheme.surfaceContainerHighest.withValues(alpha: 0.36),
+        ),
+        trackBorderColor: const WidgetStatePropertyAll(Colors.transparent),
+        radius: scrollbarRadius,
+        mainAxisMargin: 4,
+        crossAxisMargin: 3,
+        minThumbLength: 48,
+      ),
       appBarTheme: AppBarThemeData(
         elevation: 0,
         scrolledUnderElevation: 0,

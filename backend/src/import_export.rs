@@ -1,4 +1,4 @@
-use crate::db::{self, Db};
+use crate::db::Db;
 use anyhow::Result;
 use calamine::{open_workbook_auto, Data, Reader};
 use chrono::Local;
@@ -7,13 +7,43 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-pub async fn export_db_file() -> Result<String> {
-    let src = db::default_db_path();
+pub const SNAPSHOT_LIMIT: i64 = 10;
+
+/// Create a standalone SQLite snapshot that also contains committed WAL data.
+///
+/// Copying `data.db` with `fs::copy` is not safe while the application is open:
+/// SQLite keeps recent committed changes in `data.db-wal`, which would not be
+/// included in the exported file. `VACUUM INTO` asks SQLite for a consistent,
+/// self-contained database instead.
+async fn export_database_snapshot(db: &Db, destination: &Path) -> Result<()> {
+    let file_name = destination
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("导出文件路径无效"))?;
+    let temporary = destination.with_file_name(format!(
+        ".{}_{}.tmp",
+        file_name.to_string_lossy(),
+        uuid::Uuid::new_v4()
+    ));
+    let escaped_temporary = temporary.to_string_lossy().replace('\'', "''");
+
+    let result = async {
+        sqlx::query(&format!("VACUUM INTO '{}'", escaped_temporary))
+            .execute(db)
+            .await?;
+        fs::rename(&temporary, destination)?;
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    fs::remove_file(&temporary).ok();
+    result
+}
+
+pub async fn export_db_file(db: &Db) -> Result<String> {
     let dir = default_export_dir();
     fs::create_dir_all(&dir)?;
     let now = Local::now().format("%Y%m%d_%H%M%S").to_string();
     let dst = dir.join(format!("data_{}.db", now));
-    fs::copy(&src, &dst)?;
+    export_database_snapshot(db, &dst).await?;
     Ok(dst.to_string_lossy().to_string())
 }
 
@@ -33,10 +63,7 @@ pub async fn export_all_files(db: &Db, out_dir: Option<String>) -> Result<String
         "hyrwbz_bundle_{}.db",
         uuid::Uuid::new_v4()
     ));
-    let escaped_snapshot = snapshot.to_string_lossy().replace('\'', "''");
-    sqlx::query(&format!("VACUUM INTO '{}'", escaped_snapshot))
-        .execute(db)
-        .await?;
+    export_database_snapshot(db, &snapshot).await?;
 
     let result = (|| -> Result<()> {
         let file = fs::File::create(&output)?;
@@ -266,9 +293,10 @@ pub async fn create_snapshot(
     let snapshot_id = result.last_insert_rowid();
     sqlx::query(
         "DELETE FROM snapshots WHERE snapshot_id NOT IN (
-            SELECT snapshot_id FROM snapshots ORDER BY snapshot_id DESC LIMIT 5
+            SELECT snapshot_id FROM snapshots ORDER BY snapshot_id DESC LIMIT ?1
         )",
     )
+    .bind(SNAPSHOT_LIMIT)
     .execute(&mut *tx)
     .await?;
     let used_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM snapshots")
@@ -284,8 +312,9 @@ pub async fn create_snapshot(
 pub async fn list_snapshots(db: &Db) -> Result<Vec<crate::models::SnapshotInfo>> {
     let rows = sqlx::query(
         "SELECT snapshot_id, saved_at, remark
-         FROM snapshots ORDER BY snapshot_id DESC LIMIT 5",
+         FROM snapshots ORDER BY snapshot_id DESC LIMIT ?1",
     )
+    .bind(SNAPSHOT_LIMIT)
     .fetch_all(db)
     .await?;
     Ok(rows
@@ -740,7 +769,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshots_store_optional_remark_and_keep_five_entries() {
+    async fn snapshots_store_optional_remark_and_keep_ten_entries() {
         let (db, db_path) = test_db("snapshot_remark").await;
         sqlx::query(
             "INSERT INTO tasks
@@ -751,26 +780,63 @@ mod tests {
         .await
         .unwrap();
 
-        for index in 1i64..=6 {
+        for index in 1i64..=11 {
             let result = create_snapshot(&db, Some(format!("备注{index}")))
                 .await
                 .unwrap();
-            assert_eq!(result.used_count, index.min(5));
+            assert_eq!(result.used_count, index.min(SNAPSHOT_LIMIT));
         }
         let snapshots = list_snapshots(&db).await.unwrap();
-        assert_eq!(snapshots.len(), 5);
-        assert_eq!(snapshots.first().unwrap().remark, "备注6");
+        assert_eq!(snapshots.len(), SNAPSHOT_LIMIT as usize);
+        assert_eq!(snapshots.first().unwrap().remark, "备注11");
         assert_eq!(snapshots.last().unwrap().remark, "备注2");
 
         let detail = get_snapshot(&db, snapshots.first().unwrap().snapshot_id)
             .await
             .unwrap();
-        assert_eq!(detail.remark, "备注6");
+        assert_eq!(detail.remark, "备注11");
         assert_eq!(detail.tasks.len(), 1);
         assert_eq!(detail.tasks[0].task_desc, "快照任务");
 
         db.close().await;
         fs::remove_file(db_path).ok();
+    }
+
+    #[tokio::test]
+    async fn database_export_includes_uncheckpointed_wal_data() {
+        let (source, source_path) = test_db("export_wal_source").await;
+        let (target, target_path) = test_db("export_wal_target").await;
+        let export_path = std::env::temp_dir().join(format!(
+            "hyrwbz_export_wal_{}.db",
+            uuid::Uuid::new_v4()
+        ));
+
+        sqlx::query(
+            "INSERT INTO tasks (meeting_no, task_no, task_desc, dept, owner, required_date, actual_date, remark)
+             VALUES ('WAL 数据', 1, '不能丢失的任务', '', '', '', '进行中', '')",
+        )
+        .execute(&source)
+        .await
+        .unwrap();
+
+        export_database_snapshot(&source, &export_path).await.unwrap();
+        import_db_file(&target, export_path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+
+        let task_desc: String = sqlx::query_scalar(
+            "SELECT task_desc FROM tasks WHERE meeting_no = 'WAL 数据' AND task_no = 1",
+        )
+        .fetch_one(&target)
+        .await
+        .unwrap();
+        assert_eq!(task_desc, "不能丢失的任务");
+
+        source.close().await;
+        target.close().await;
+        fs::remove_file(source_path).ok();
+        fs::remove_file(target_path).ok();
+        fs::remove_file(export_path).ok();
     }
 
     #[tokio::test]
