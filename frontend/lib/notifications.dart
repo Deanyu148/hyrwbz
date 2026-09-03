@@ -10,84 +10,112 @@ import 'screens/date_picker_dialog.dart';
 
 const _notificationRefreshInterval = Duration(seconds: 30);
 
-class NotificationListView extends StatelessWidget {
+class NotificationListView extends StatefulWidget {
   static const double bodyFontSize = 16;
   static const double bodyLineHeight = 1.4;
   static const double _verticalPadding = bodyFontSize * bodyLineHeight / 2;
 
   final List<NotificationItem> notifications;
   final Future<void> Function(NotificationItem item) onTap;
+  final ScrollController? controller;
 
   const NotificationListView({
     super.key,
     required this.notifications,
     required this.onTap,
+    this.controller,
   });
 
   @override
+  State<NotificationListView> createState() => _NotificationListViewState();
+}
+
+class _NotificationListViewState extends State<NotificationListView> {
+  late final ScrollController _scrollController;
+  late final bool _ownsScrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsScrollController = widget.controller == null;
+    _scrollController = widget.controller ?? ScrollController();
+  }
+
+  @override
+  void dispose() {
+    if (_ownsScrollController) _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (notifications.isEmpty) {
+    if (widget.notifications.isEmpty) {
       return const Center(child: Text('暂无通知'));
     }
-    return ListView.separated(
-      padding: EdgeInsets.zero,
-      itemCount: notifications.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (context, index) {
-        final item = notifications[index];
-        return Tooltip(
-          message: '点击查看详情',
-          child: InkWell(
-            key: ValueKey('full-notification-${item.id}'),
-            onTap: () => onTap(item),
-            child: Container(
-              color: item.isRead
-                  ? Colors.transparent
-                  : Theme.of(context).colorScheme.primary.withValues(alpha: 0.035),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: _verticalPadding,
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 16,
-                    child: item.isRead
-                        ? null
-                        : Center(
-                            child: Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Colors.red,
-                                shape: BoxShape.circle,
+    return Scrollbar(
+      controller: _scrollController,
+      interactive: true,
+      child: ListView.separated(
+        controller: _scrollController,
+        padding: EdgeInsets.zero,
+        itemCount: widget.notifications.length,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final item = widget.notifications[index];
+          return Tooltip(
+            message: '点击查看详情',
+            child: InkWell(
+              key: ValueKey('full-notification-${item.id}'),
+              onTap: () => widget.onTap(item),
+              child: Container(
+                color: item.isRead
+                    ? Colors.transparent
+                    : Theme.of(context).colorScheme.primary.withValues(alpha: 0.035),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: NotificationListView._verticalPadding,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      child: item.isRead
+                          ? null
+                          : Center(
+                              child: Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Colors.red,
+                                  shape: BoxShape.circle,
+                                ),
                               ),
                             ),
-                          ),
-                  ),
-                  Expanded(
-                    child: Text(
-                      item.message,
-                      textAlign: TextAlign.left,
-                      style: const TextStyle(
-                        fontSize: bodyFontSize,
-                        height: bodyLineHeight,
+                    ),
+                    Expanded(
+                      child: Text(
+                        item.message,
+                        textAlign: TextAlign.left,
+                        style: const TextStyle(
+                          fontSize: NotificationListView.bodyFontSize,
+                          height: NotificationListView.bodyLineHeight,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }
 
 /// 仅供鼠标悬停预览使用的紧凑面板，与完整通知界面完全独立。
-class CompactNotificationPanel extends StatelessWidget {
+class CompactNotificationPanel extends StatefulWidget {
   static const IconData markAllReadIcon = Icons.done_all_rounded;
   static const double panelScale = 3;
   static const double panelWidth = 130 * panelScale;
@@ -111,13 +139,36 @@ class CompactNotificationPanel extends StatelessWidget {
   final List<NotificationItem> notifications;
   final Future<void> Function() onMarkAllRead;
   final Future<void> Function(NotificationItem item) onTap;
+  final ScrollController? controller;
 
   const CompactNotificationPanel({
     super.key,
     required this.notifications,
     required this.onMarkAllRead,
     required this.onTap,
+    this.controller,
   });
+
+  @override
+  State<CompactNotificationPanel> createState() => _CompactNotificationPanelState();
+}
+
+class _CompactNotificationPanelState extends State<CompactNotificationPanel> {
+  late final ScrollController _scrollController;
+  late final bool _ownsScrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsScrollController = widget.controller == null;
+    _scrollController = widget.controller ?? ScrollController();
+  }
+
+  @override
+  void dispose() {
+    if (_ownsScrollController) _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -127,7 +178,7 @@ class CompactNotificationPanel extends StatelessWidget {
         ColoredBox(
           color: Theme.of(context).colorScheme.surfaceContainerLow,
           child: SizedBox(
-            height: _headerHeight,
+            height: CompactNotificationPanel._headerHeight,
             child: Padding(
               padding: const EdgeInsets.only(left: 10, right: 4),
               child: Row(
@@ -151,18 +202,18 @@ class CompactNotificationPanel extends StatelessWidget {
                       width: 30,
                       height: 30,
                     ),
-                    onPressed: notifications.any((item) => !item.isRead)
-                        ? onMarkAllRead
+                    onPressed: widget.notifications.any((item) => !item.isRead)
+                        ? widget.onMarkAllRead
                         : null,
-                    icon: const Icon(markAllReadIcon, size: 17),
+                    icon: const Icon(CompactNotificationPanel.markAllReadIcon, size: 17),
                   ),
                 ],
               ),
             ),
           ),
         ),
-        const Divider(height: _dividerHeight),
-        if (notifications.isEmpty)
+        const Divider(height: CompactNotificationPanel._dividerHeight),
+        if (widget.notifications.isEmpty)
           const Expanded(
             child: Center(
               child: Text(
@@ -174,22 +225,25 @@ class CompactNotificationPanel extends StatelessWidget {
         else
           Expanded(
             child: Scrollbar(
+              controller: _scrollController,
+              interactive: true,
               child: ListView.separated(
+                controller: _scrollController,
                 padding: EdgeInsets.zero,
-                itemCount: notifications.length,
+                itemCount: widget.notifications.length,
                 separatorBuilder: (_, __) =>
-                    const Divider(height: _dividerHeight),
+                    const Divider(height: CompactNotificationPanel._dividerHeight),
                 itemBuilder: (context, index) {
-                  final item = notifications[index];
+                  final item = widget.notifications[index];
                   return Tooltip(
                     message: '点击查看详情',
                     child: InkWell(
                       key: ValueKey('compact-notification-${item.id}'),
-                      onTap: () => onTap(item),
+                      onTap: () => widget.onTap(item),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 6,
-                          vertical: _bodyVerticalPadding,
+                          vertical: CompactNotificationPanel._bodyVerticalPadding,
                         ),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.center,
@@ -214,8 +268,8 @@ class CompactNotificationPanel extends StatelessWidget {
                                 item.message,
                                 textAlign: TextAlign.left,
                                 style: const TextStyle(
-                                  fontSize: bodyFontSize,
-                                  height: bodyLineHeight,
+                                  fontSize: CompactNotificationPanel.bodyFontSize,
+                                  height: CompactNotificationPanel.bodyLineHeight,
                                 ),
                               ),
                             ),

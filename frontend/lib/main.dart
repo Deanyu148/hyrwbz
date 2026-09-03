@@ -66,6 +66,9 @@ class HyrwbzApp extends StatelessWidget {
       title: '会议任务管理跟踪系统',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
+      // 桌面端默认会自动为 Scrollable 添加滚动条；需要显示滚动条的区域
+      // 都使用显式控制器和 Scrollbar，关闭自动滚动条避免重复显示。
+      scrollBehavior: MaterialScrollBehavior().copyWith(scrollbars: false),
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
       localizationsDelegates: const [

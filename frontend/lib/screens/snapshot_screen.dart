@@ -43,6 +43,7 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
   ];
 
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   SnapshotDetail? _detail;
   Object? _error;
   FilterReq _filter = const FilterReq();
@@ -63,6 +64,7 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -377,7 +379,10 @@ class _SnapshotScreenState extends State<SnapshotScreen> {
                                     _header(widths),
                                     Expanded(
                                       child: Scrollbar(
+                                        controller: _scrollController,
+                                        interactive: true,
                                         child: ListView.builder(
+                                          controller: _scrollController,
                                           itemCount: tasks.length,
                                           itemBuilder: (context, index) =>
                                               _row(index, tasks[index], widths),

@@ -1106,6 +1106,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 Expanded(
                                   child: Scrollbar(
                                     controller: _tableScrollController,
+                                    interactive: true,
                                     child: ListView.builder(
                                       controller: _tableScrollController,
                                       itemCount: _tasks.length,
