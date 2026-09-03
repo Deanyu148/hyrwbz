@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'app_widgets.dart';
 
 class AppBarSearchTitle extends StatelessWidget {
   static const double searchVerticalOffset = 2;
@@ -64,22 +65,15 @@ class AppSearchField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final border = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(20),
-      borderSide: BorderSide(color: scheme.outlineVariant),
-    );
     return SizedBox(
       height: fieldHeight,
       child: TextField(
         controller: controller,
         onChanged: onChanged,
         textInputAction: TextInputAction.search,
-        decoration: InputDecoration(
+        decoration: appInputDecoration(
+          context,
           hintText: hintText,
-          isDense: true,
-          filled: true,
-          fillColor: scheme.surfaceContainerLow,
-          contentPadding: const EdgeInsets.symmetric(vertical: 8),
           prefixIcon: Icon(Icons.search_rounded, size: 20, color: scheme.primary),
           prefixIconConstraints: const BoxConstraints(minWidth: 40),
           suffixIcon: loading
@@ -101,11 +95,7 @@ class AppSearchField extends StatelessWidget {
                       },
                     ),
           suffixIconConstraints: const BoxConstraints(minWidth: 40),
-          border: border,
-          enabledBorder: border,
-          focusedBorder: border.copyWith(
-            borderSide: BorderSide(color: scheme.primary, width: 1.5),
-          ),
+          compact: true,
         ),
       ),
     );
@@ -130,29 +120,16 @@ class AppFilterField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final border = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(20),
-      borderSide: BorderSide(color: scheme.outlineVariant),
-    );
     return SizedBox(
       height: AppSearchField.fieldHeight,
       child: TextField(
         controller: controller,
         keyboardType: keyboardType,
         inputFormatters: inputFormatters,
-        decoration: InputDecoration(
+        decoration: appInputDecoration(
+          context,
           hintText: hintText,
-          hintStyle: TextStyle(color: scheme.onSurfaceVariant),
-          isDense: true,
-          filled: true,
-          fillColor: scheme.surfaceContainerLow,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          border: border,
-          enabledBorder: border,
-          focusedBorder: border.copyWith(
-            borderSide: BorderSide(color: scheme.primary, width: 1.5),
-          ),
+          compact: true,
         ),
       ),
     );

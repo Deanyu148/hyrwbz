@@ -1,5 +1,51 @@
 import 'package:flutter/material.dart';
 
+
+
+/// 所有业务输入框共用的装饰样式，和添加/编辑窗口的输入框保持一致。
+InputDecoration appInputDecoration(
+  BuildContext context, {
+  String? labelText,
+  String? hintText,
+  Widget? prefixIcon,
+  Widget? suffixIcon,
+  BoxConstraints? prefixIconConstraints,
+  BoxConstraints? suffixIconConstraints,
+  bool compact = false,
+}) {
+  final scheme = Theme.of(context).colorScheme;
+  final border = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(12),
+    borderSide: BorderSide(color: scheme.outlineVariant),
+  );
+  return InputDecoration(
+    labelText: labelText,
+    hintText: hintText,
+    hintStyle: TextStyle(color: scheme.onSurfaceVariant),
+    prefixIcon: prefixIcon,
+    prefixIconConstraints: prefixIconConstraints,
+    suffixIcon: suffixIcon,
+    suffixIconConstraints: suffixIconConstraints,
+    isDense: true,
+    filled: true,
+    fillColor: scheme.surfaceContainerLow,
+    contentPadding: compact
+        ? const EdgeInsets.symmetric(horizontal: 14, vertical: 8)
+        : const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+    border: border,
+    enabledBorder: border,
+    focusedBorder: border.copyWith(
+      borderSide: BorderSide(color: scheme.primary, width: 1.5),
+    ),
+    errorBorder: border.copyWith(
+      borderSide: BorderSide(color: scheme.error),
+    ),
+    focusedErrorBorder: border.copyWith(
+      borderSide: BorderSide(color: scheme.error, width: 1.5),
+    ),
+  );
+}
+
 class AppSurface extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;

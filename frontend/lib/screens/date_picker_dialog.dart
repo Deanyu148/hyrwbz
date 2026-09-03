@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../app_widgets.dart';
 
 /// 日期选择对话框：同时提供日期选择框与手动键盘输入框，二者同步。
 /// 使用显式维护月份的日历，避免 CalendarDatePicker 在窄窗口重布局时翻月错乱。
@@ -230,10 +231,11 @@ class _S extends State<DatePickerDialogWidget> {
                   children: [
                     TextField(
                       controller: _ctrl,
-                      decoration: const InputDecoration(
+                      decoration: appInputDecoration(
+                        context,
                         labelText: 'YYYY/MM/DD',
                         hintText: '2026/09/01',
-                        suffixIcon: Icon(Icons.calendar_month),
+                        suffixIcon: const Icon(Icons.calendar_month),
                       ),
                       onChanged: (value) {
                         final date = _parseDate(value);
@@ -355,12 +357,14 @@ class _DateRangeFieldState extends State<DateRangeField> {
       width: 150,
       child: TextField(
         controller: controller,
-        decoration: InputDecoration(
+        decoration: appInputDecoration(
+          context,
           hintText: from ? '开始' : '结束',
           suffixIcon: IconButton(
             icon: const Icon(Icons.date_range),
             onPressed: () => _pick(from),
           ),
+          compact: true,
         ),
       ),
     );

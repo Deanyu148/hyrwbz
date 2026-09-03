@@ -53,11 +53,12 @@ abstract final class AppTheme {
         filled: true,
         fillColor: scheme.surfaceContainerLow,
         isDense: true,
+        hintStyle: TextStyle(color: scheme.onSurfaceVariant),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
         border: roundedBorder,
         enabledBorder: roundedBorder,
         focusedBorder: roundedBorder.copyWith(
-          borderSide: BorderSide(color: scheme.primary, width: 1.6),
+          borderSide: BorderSide(color: scheme.primary, width: 1.5),
         ),
         errorBorder: roundedBorder.copyWith(
           borderSide: BorderSide(color: scheme.error),
