@@ -476,6 +476,24 @@ Windows 本地完整构建建议安装：
 | 中文排序 | pinyin |
 | 文件选择 | file_picker |
 
+### 生成导入/导出回归测试数据
+
+使用标准库脚本生成一套固定为 5000 条任务的测试输入，覆盖软件的 Excel、CSV、数据库和全量文件导入功能：
+
+```powershell
+python -B scripts/gen_test_xls.py --clean
+```
+
+默认输出到 `test-fixtures-5000/`：
+
+- `tasks_5000.xlsx`：标准 XLSX，覆盖 Excel 导入；
+- `tasks_5000.csv`：UTF-8 BOM CSV，覆盖中文逗号/顿号、逗号转义、延期和实际完成状态；
+- `data_5000.db`：包含 `tasks`、`delays`、`meta`、`snapshots` 和 `attachments` 的完整数据库，覆盖数据库导入；
+- `hyrwbz_all_files_5000.zip`：包含 `data.db` 和真实附件实体文件，覆盖“导入所有文件”；
+- `manifest.json`：记录各类数据数量、覆盖场景和文件 SHA-256 校验值。
+
+可使用 `--output-dir` 指定输出目录、`--seed` 固定随机种子；`--count` 可生成不超过 5000 条的较小数据集，默认和交付回归数据均为 5000 条。
+
 ### 1. 构建后端
 
 ```powershell
@@ -708,7 +726,7 @@ permissions:
 ├── installer/
 │   └── hyrwbz.iss                  # Inno Setup 安装脚本
 ├── scripts/
-│   ├── gen_test_xls.py             # 生成测试 XLS 数据
+│   ├── gen_test_xls.py             # 生成 5000 条 Excel/CSV/数据库/全量 ZIP 测试数据
 │   └── mirror_release.py           # GitHub Release 镜像到 CNB
 ├── .github/workflows/
 │   └── build-windows.yml
