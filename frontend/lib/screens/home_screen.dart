@@ -1006,6 +1006,7 @@ class _HomeScreenState extends State<HomeScreen> {
           controller: _searchController,
           hintText: '搜索任务（空格分词、引号短语、-排除）',
           onChanged: _searchTasks,
+          titleFontSizeDelta: 3,
           loading: _searching,
         ),
         actions: [

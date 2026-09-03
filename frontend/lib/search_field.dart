@@ -3,9 +3,12 @@ import 'package:flutter/services.dart';
 import 'app_widgets.dart';
 
 class AppBarSearchTitle extends StatelessWidget {
+  /// 主界面标题可单独放大，标题宽度始终为搜索框预留空间。
   static const double searchVerticalOffset = 2;
+  static const double titleWidthReserveForSearch = 180;
 
   final String title;
+  final double titleFontSizeDelta;
   final TextEditingController controller;
   final String hintText;
   final ValueChanged<String> onChanged;
@@ -17,31 +20,56 @@ class AppBarSearchTitle extends StatelessWidget {
     required this.controller,
     required this.hintText,
     required this.onChanged,
+    this.titleFontSizeDelta = 0,
     this.loading = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: AppSearchField.fieldHeight,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-          const SizedBox(width: 18),
-          Expanded(
-            child: Transform.translate(
-              offset: const Offset(0, searchVerticalOffset),
-              child: AppSearchField(
-                controller: controller,
-                hintText: hintText,
-                onChanged: onChanged,
-                loading: loading,
+    final theme = Theme.of(context);
+    final baseTitleStyle = theme.appBarTheme.titleTextStyle ??
+        theme.textTheme.titleLarge ??
+        const TextStyle(fontSize: 20);
+    final titleStyle = baseTitleStyle.copyWith(
+      fontSize: (baseTitleStyle.fontSize ?? 20) + titleFontSizeDelta,
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxTitleWidth = constraints.maxWidth.isFinite
+            ? (constraints.maxWidth - 18 - titleWidthReserveForSearch)
+                .clamp(0.0, 360.0)
+                .toDouble()
+            : 360.0;
+        return SizedBox(
+          height: AppSearchField.fieldHeight,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxTitleWidth),
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: titleStyle,
+                ),
               ),
-            ),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Transform.translate(
+                  offset: const Offset(0, searchVerticalOffset),
+                  child: AppSearchField(
+                    controller: controller,
+                    hintText: hintText,
+                    onChanged: onChanged,
+                    loading: loading,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -102,8 +130,8 @@ class AppSearchField extends StatelessWidget {
   }
 }
 
-/// 与主界面搜索栏共享填充色、圆角、边框和提示文字样式的普通输入框。
-/// 用于筛选弹窗，避免筛选字段使用另一套浮动标签视觉。
+/// 与添加/编辑窗口共享标准高度、浮动标签、填充色和边框样式的普通输入框。
+/// 用于筛选弹窗，搜索栏仍使用独立的紧凑布局。
 class AppFilterField extends StatelessWidget {
   final TextEditingController controller;
   final String hintText;
@@ -120,17 +148,13 @@ class AppFilterField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: AppSearchField.fieldHeight,
-      child: TextField(
-        controller: controller,
-        keyboardType: keyboardType,
-        inputFormatters: inputFormatters,
-        decoration: appInputDecoration(
-          context,
-          hintText: hintText,
-          compact: true,
-        ),
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      decoration: appInputDecoration(
+        context,
+        labelText: hintText,
       ),
     );
   }

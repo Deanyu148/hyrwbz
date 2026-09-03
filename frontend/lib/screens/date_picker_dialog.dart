@@ -364,7 +364,7 @@ class _DateRangeFieldState extends State<DateRangeField> {
             icon: const Icon(Icons.date_range),
             onPressed: () => _pick(from),
           ),
-          compact: true,
+          labelText: from ? '开始日期' : '结束日期',
         ),
       ),
     );
