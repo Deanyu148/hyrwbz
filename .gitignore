@@ -5,3 +5,6 @@
 .idea/
 .vscode/
 scripts/__pycache__/
+
+#测试用例
+test-fixtures-5000/
